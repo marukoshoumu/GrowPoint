@@ -113,7 +113,7 @@ function getStage2Prompt(userMaster, glossaryEntries, previousIssues) {
       return getPromptFromFile_(fileIds.stage2, {
         userName: userMaster.name,
         staffName: userMaster.staff,
-        shortTermGoals: (userMaster.shortTermGoals || []).join('、'),
+        shortTermGoals: [userMaster.shortTermGoal1, userMaster.shortTermGoal2].filter(Boolean).join('、'),
         previousIssues: previousIssues || '初回モニタリングのため、前回の課題なし',
         glossary: glossaryInjection,
         jsonSchema: getStage2JsonSchema(),
@@ -425,7 +425,7 @@ function getStage3APrompt(userMaster, extractionJson) {
       return getPromptFromFile_(fileIds.stage3a, {
         userName: userMaster.name,
         staffName: userMaster.staff,
-        serviceManager: userMaster.serviceManager,
+        serviceManager: userMaster.manager,
         date: userMaster.date,
         previousMonitoringDate: userMaster.previousMonitoringDate || '初回',
         nextMonitoringMonth: userMaster.nextMonitoringMonth || '',
@@ -546,7 +546,7 @@ function getStage3BPrompt(userMaster, extractionJson) {
         userName: userMaster.name,
         date: userMaster.date,
         staffName: userMaster.staff,
-        serviceManager: userMaster.serviceManager,
+        serviceManager: userMaster.manager,
         previousMonitoringDate: userMaster.previousMonitoringDate || '初回',
         nextMonitoringMonth: userMaster.nextMonitoringMonth || '',
         extractionJson: extractionJson
