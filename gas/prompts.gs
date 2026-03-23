@@ -101,6 +101,33 @@ function buildStage1PromptHardcoded_(glossaryEntries) {
 
 
 function getStage2Prompt(userMaster, glossaryEntries, previousIssues) {
+  const fileIds = getPromptFileIds();
+  if (fileIds.stage2) {
+    try {
+      let glossaryInjection = '';
+      if (glossaryEntries && glossaryEntries.length > 0) {
+        glossaryInjection = glossaryEntries.map((e) => {
+          return `- ${e.term} → ${e.formal}`;
+        }).join('\n');
+      }
+      return getPromptFromFile_(fileIds.stage2, {
+        userName: userMaster.name,
+        staffName: userMaster.staff,
+        shortTermGoals: (userMaster.shortTermGoals || []).join('、'),
+        previousIssues: previousIssues || '初回モニタリングのため、前回の課題なし',
+        glossary: glossaryInjection,
+        jsonSchema: getStage2JsonSchema(),
+        fewShotExample: getStage2FewShotExample()
+      });
+    } catch (e) {
+      logWarn('prompts', `Stage2プロンプトファイル読み込み失敗、ハードコード版を使用: ${e.message}`);
+    }
+  }
+  return buildStage2PromptHardcoded_(userMaster, glossaryEntries, previousIssues);
+}
+
+
+function buildStage2PromptHardcoded_(userMaster, glossaryEntries, previousIssues) {
   let glossaryInjection = '';
   if (glossaryEntries && glossaryEntries.length > 0) {
     glossaryInjection = glossaryEntries.map((e) => {
@@ -392,6 +419,35 @@ function getStage2FewShotExample() {
 
 
 function getStage3APrompt(userMaster, extractionJson) {
+  const fileIds = getPromptFileIds();
+  if (fileIds.stage3a) {
+    try {
+      return getPromptFromFile_(fileIds.stage3a, {
+        userName: userMaster.name,
+        staffName: userMaster.staff,
+        serviceManager: userMaster.serviceManager,
+        date: userMaster.date,
+        previousMonitoringDate: userMaster.previousMonitoringDate || '初回',
+        nextMonitoringMonth: userMaster.nextMonitoringMonth || '',
+        longTermGoal: userMaster.longTermGoal,
+        shortTermGoal1: userMaster.shortTermGoal1,
+        supportContent1: userMaster.supportContent1,
+        goal1Period: userMaster.goal1Period,
+        shortTermGoal2: userMaster.shortTermGoal2 || 'なし',
+        supportContent2: userMaster.supportContent2 || 'なし',
+        goal2Period: userMaster.goal2Period || '',
+        attendees: userMaster.attendees || '',
+        extractionJson: extractionJson
+      });
+    } catch (e) {
+      logWarn('prompts', `Stage3Aプロンプトファイル読み込み失敗、ハードコード版を使用: ${e.message}`);
+    }
+  }
+  return buildStage3APromptHardcoded_(userMaster, extractionJson);
+}
+
+
+function buildStage3APromptHardcoded_(userMaster, extractionJson) {
   return 'あなたは就労継続支援B型事業所の支援記録を作成するAIアシスタントです。\n\n'
     + '【タスク】\n'
     + '構造化抽出JSONと利用者マスター情報をもとに、盛岡市様式の「モニタリング記録票」を作成してください。\n\n'
@@ -483,6 +539,27 @@ function getStage3APrompt(userMaster, extractionJson) {
 
 
 function getStage3BPrompt(userMaster, extractionJson) {
+  const fileIds = getPromptFileIds();
+  if (fileIds.stage3b) {
+    try {
+      return getPromptFromFile_(fileIds.stage3b, {
+        userName: userMaster.name,
+        date: userMaster.date,
+        staffName: userMaster.staff,
+        serviceManager: userMaster.serviceManager,
+        previousMonitoringDate: userMaster.previousMonitoringDate || '初回',
+        nextMonitoringMonth: userMaster.nextMonitoringMonth || '',
+        extractionJson: extractionJson
+      });
+    } catch (e) {
+      logWarn('prompts', `Stage3Bプロンプトファイル読み込み失敗、ハードコード版を使用: ${e.message}`);
+    }
+  }
+  return buildStage3BPromptHardcoded_(userMaster, extractionJson);
+}
+
+
+function buildStage3BPromptHardcoded_(userMaster, extractionJson) {
   return 'あなたは就労継続支援B型事業所のモニタリングシート（就労関係）の下書きを作成するAIアシスタントです。\n\n'
     + '【タスク】\n'
     + '構造化抽出JSONの monitoring_sheet_evidence セクションをもとに、\n'

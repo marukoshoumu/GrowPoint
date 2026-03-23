@@ -70,3 +70,13 @@ function getTemplateIds() {
 function getSpreadsheetId() {
   return PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
 }
+
+function getPromptFileIds() {
+  const props = PropertiesService.getScriptProperties();
+  return {
+    stage1: props.getProperty('PROMPT_FILE_ID_STAGE1'),
+    stage2: props.getProperty('PROMPT_FILE_ID_STAGE2'),
+    stage3a: props.getProperty('PROMPT_FILE_ID_STAGE3A'),
+    stage3b: props.getProperty('PROMPT_FILE_ID_STAGE3B')
+  };
+}
