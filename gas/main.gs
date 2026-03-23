@@ -1,125 +1,328 @@
 /**
- * メインエントリポイント：未処理音声ファイルを検出し、パイプラインを実行する。
- * 時間ベースのトリガーから呼び出される。
+ * メインエントリポイント：未処理音声ファイルを検出し、ステージ分割でパイプラインを実行する。
+ * 時間ベースのトリガーから呼び出される（5分間隔）。
  */
 function processNewFiles() {
+  const startTime = Date.now();
+
+  // タイムアウトしたジョブを回復
+  recoverTimedOutJobs_();
+
+  // 新規音声ファイルを検出し、QUEUEDとして登録
   const audioFiles = detectNewAudioFiles();
-
-  if (audioFiles.length === 0) {
-    logInfo('Main', '未処理ファイルなし');
-    return;
-  }
-
   for (let i = 0; i < audioFiles.length; i++) {
     try {
-      processSingleFile(audioFiles[i]);
+      enqueueFile_(audioFiles[i]);
     } catch (e) {
-      logError('Main', `処理失敗: ${audioFiles[i].name}`, { error: e.message, stack: e.stack });
+      logError('Main', `キュー登録失敗: ${audioFiles[i].name}`, { error: e.message });
+    }
+  }
+
+  // ステージディスパッチ
+  dispatchNextStage_(startTime);
+}
+
+
+/**
+ * 経過時間をチェックしながら、1ファイルずつ1ステージずつ処理する。
+ */
+function dispatchNextStage_(startTime) {
+  const elapsed = () => Date.now() - startTime;
+
+  // QUEUED → Stage1
+  const queuedJobs = findRowsByStatus(CONFIG.STATUS.QUEUED);
+  for (let i = 0; i < queuedJobs.length; i++) {
+    if (elapsed() > CONFIG.STAGE_TIME_LIMIT_MS) {
+      logInfo('Main', 'タイムリミット到達（Stage1前）');
+      return;
+    }
+    try {
+      executeStage1_(queuedJobs[i]);
+    } catch (e) {
+      logError('Main', `Stage1例外: ${queuedJobs[i].processId}`, { error: e.message });
+      handleError_(queuedJobs[i].processId, queuedJobs[i].rowNumber, e.message);
+    }
+  }
+
+  // STAGE1_DONE → Stage2
+  const stage1DoneJobs = findRowsByStatus(CONFIG.STATUS.STAGE1_DONE);
+  for (let i = 0; i < stage1DoneJobs.length; i++) {
+    if (elapsed() > CONFIG.STAGE_TIME_LIMIT_MS) {
+      logInfo('Main', 'タイムリミット到達（Stage2前）');
+      return;
+    }
+    try {
+      executeStage2_(stage1DoneJobs[i]);
+    } catch (e) {
+      logError('Main', `Stage2例外: ${stage1DoneJobs[i].processId}`, { error: e.message });
+      handleError_(stage1DoneJobs[i].processId, stage1DoneJobs[i].rowNumber, e.message);
+    }
+  }
+
+  // STAGE2_DONE → Stage3
+  const stage2DoneJobs = findRowsByStatus(CONFIG.STATUS.STAGE2_DONE);
+  for (let i = 0; i < stage2DoneJobs.length; i++) {
+    if (elapsed() > CONFIG.STAGE_TIME_LIMIT_MS) {
+      logInfo('Main', 'タイムリミット到達（Stage3前）');
+      return;
+    }
+    try {
+      executeStage3_(stage2DoneJobs[i]);
+    } catch (e) {
+      logError('Main', `Stage3例外: ${stage2DoneJobs[i].processId}`, { error: e.message });
+      handleError_(stage2DoneJobs[i].processId, stage2DoneJobs[i].rowNumber, e.message);
     }
   }
 }
 
 
 /**
- * 単一音声ファイルの全パイプライン処理
+ * 新規音声ファイルをキューに登録する。
  */
-function processSingleFile(audioFile) {
-  const processId = Utilities.getUuid();
+function enqueueFile_(audioFile) {
   const parsed = parseFileNameForUser(audioFile.name);
-  const userName = parsed.userName;
-  const interviewDate = parsed.date;
+  const processId = audioFile.id;
 
-  logInfo('Main', 'パイプライン開始', {
-    processId: processId,
-    file: audioFile.name,
-    user: userName,
-    date: interviewDate
-  });
-
-  const dashboardRow = addDashboardRow(
-    processId, userName, interviewDate, audioFile.name, CONFIG.STATUS.PROCESSING
-  );
+  // 重複チェック
+  const existingRow = findDashboardRowByProcessId(processId);
+  if (existingRow !== -1) {
+    logInfo('Main', `重複スキップ: ${audioFile.name} (${processId})`);
+    return;
+  }
 
   moveToProcessing(audioFile.id);
+
+  const dashboardRow = addDashboardRow(
+    processId, parsed.userName, parsed.date, audioFile.name, CONFIG.STATUS.QUEUED
+  );
+
+  logInfo('Main', 'キュー登録完了', {
+    processId: processId,
+    file: audioFile.name,
+    user: parsed.userName,
+    date: parsed.date,
+    row: dashboardRow
+  });
+}
+
+
+/**
+ * Stage 1: 文字起こし
+ */
+function executeStage1_(job) {
+  logInfo('Main', `Stage1開始: ${job.processId}`);
+  updateDashboardStatus(job.rowNumber, {
+    'ステータス': CONFIG.STATUS.STAGE1_RUNNING,
+    '処理開始': formatDateTime()
+  });
+
+  const folderIds = getFolderIds();
+  const userName = job.userName;
+  const interviewDate = job.interviewDate;
 
   let userMaster;
   try {
     userMaster = loadUserMaster(userName);
     userMaster.date = interviewDate;
   } catch (e) {
-    handleError_(processId, dashboardRow, audioFile.id, `マスター取得失敗: ${e.message}`);
+    handleError_(job.processId, job.rowNumber, `マスター取得失敗: ${e.message}`);
     return;
   }
+
+  const processingFolder = createUserProcessingFolder(folderIds.extracted, userName, interviewDate);
+
+  const stage1 = runStage1(job.processId);
+  if (!stage1.success) {
+    handleError_(job.processId, job.rowNumber, `Stage1失敗: ${stage1.error}`);
+    return;
+  }
+
+  const transcriptFileId = saveTranscript(
+    processingFolder.getId(), userName, interviewDate, stage1.data.transcript
+  );
+
+  updateDashboardStatus(job.rowNumber, {
+    'ステータス': CONFIG.STATUS.STAGE1_DONE,
+    '文字起こし': getFileUrl(transcriptFileId)
+  });
+
+  logInfo('Main', `Stage1完了: ${job.processId}`);
+}
+
+
+/**
+ * Stage 2: 構造化抽出
+ */
+function executeStage2_(job) {
+  logInfo('Main', `Stage2開始: ${job.processId}`);
+  updateDashboardStatus(job.rowNumber, {
+    'ステータス': CONFIG.STATUS.STAGE2_RUNNING
+  });
+
+  const userName = job.userName;
+  const interviewDate = job.interviewDate;
+
+  let userMaster;
+  try {
+    userMaster = loadUserMaster(userName);
+    userMaster.date = interviewDate;
+  } catch (e) {
+    handleError_(job.processId, job.rowNumber, `マスター取得失敗: ${e.message}`);
+    return;
+  }
+
+  // 文字起こしファイルからテキストを読み込む
+  const transcriptFileId = extractFileIdFromUrl_(job.transcriptUrl);
+  const transcriptFile = DriveApp.getFileById(transcriptFileId);
+  const transcript = transcriptFile.getBlob().getDataAsString();
 
   const folderIds = getFolderIds();
   const processingFolder = createUserProcessingFolder(folderIds.extracted, userName, interviewDate);
 
-  // === Stage 1: 文字起こし ===
-  updateDashboardStatus(dashboardRow, { 'ステータス': '文字起こし中...' });
-  const stage1 = runStage1(audioFile.id);
-  if (!stage1.success) {
-    handleError_(processId, dashboardRow, audioFile.id, `Stage1失敗: ${stage1.error}`);
-    return;
-  }
-
-  const transcriptFileId = saveTranscript(processingFolder.getId(), userName, interviewDate, stage1.transcript);
-  updateDashboardStatus(dashboardRow, {
-    '文字起こし': getFileUrl(transcriptFileId)
-  });
-
-  // === Stage 2: 構造化抽出 ===
-  updateDashboardStatus(dashboardRow, { 'ステータス': '構造化抽出中...' });
-  const stage2 = runStage2(stage1.transcript, userMaster);
+  const stage2 = runStage2(transcript, userMaster);
   if (!stage2.success) {
-    handleError_(processId, dashboardRow, audioFile.id, `Stage2失敗: ${stage2.error}`);
+    handleError_(job.processId, job.rowNumber, `Stage2失敗: ${stage2.error}`);
     return;
   }
 
-  const extractionFileId = saveExtraction(processingFolder.getId(), userName, interviewDate, stage2.rawJson);
-  updateDashboardStatus(dashboardRow, {
+  const extractionFileId = saveExtraction(
+    processingFolder.getId(), userName, interviewDate, stage2.data.rawJson
+  );
+
+  updateDashboardStatus(job.rowNumber, {
+    'ステータス': CONFIG.STATUS.STAGE2_DONE,
     '構造化抽出': getFileUrl(extractionFileId)
   });
 
-  // === Stage 3-A: モニタリング記録票 ===
-  updateDashboardStatus(dashboardRow, { 'ステータス': '記録票生成中...' });
-  const stage3a = runStage3A(stage2.data, userMaster);
-  if (!stage3a.success) {
-    handleError_(processId, dashboardRow, audioFile.id, `Stage3A失敗: ${stage3a.error}`);
+  logInfo('Main', `Stage2完了: ${job.processId}`);
+}
+
+
+/**
+ * Stage 3: 記録票(3A)とシート(3B)を独立に実行
+ */
+function executeStage3_(job) {
+  logInfo('Main', `Stage3開始: ${job.processId}`);
+  updateDashboardStatus(job.rowNumber, {
+    'ステータス': CONFIG.STATUS.STAGE3_RUNNING
+  });
+
+  const userName = job.userName;
+  const interviewDate = job.interviewDate;
+
+  let userMaster;
+  try {
+    userMaster = loadUserMaster(userName);
+    userMaster.date = interviewDate;
+  } catch (e) {
+    handleError_(job.processId, job.rowNumber, `マスター取得失敗: ${e.message}`);
     return;
   }
 
-  const recordResult = fillMonitoringRecord(userMaster, stage3a.text);
-  updateDashboardStatus(dashboardRow, {
-    '記録票リンク': recordResult.url
-  });
+  // 抽出JSONファイルを読み込む
+  const extractionFileId = extractFileIdFromUrl_(job.extractionUrl);
+  const extractionFile = DriveApp.getFileById(extractionFileId);
+  const extractionJson = extractionFile.getBlob().getDataAsString();
+  const extractionData = JSON.parse(extractionJson);
 
-  // === Stage 3-B: モニタリングシート ===
-  updateDashboardStatus(dashboardRow, { 'ステータス': 'シート生成中...' });
-  const stage3b = runStage3B(stage2.data, userMaster);
-  if (!stage3b.success) {
-    handleError_(processId, dashboardRow, audioFile.id, `Stage3B失敗: ${stage3b.error}`);
-    return;
+  let stage3aOk = false;
+  let stage3bOk = false;
+  const updates = {};
+
+  // Stage 3A: モニタリング記録票
+  try {
+    const stage3a = runStage3A(extractionData, userMaster);
+    if (stage3a.success) {
+      const recordResult = fillMonitoringRecord(userMaster, stage3a.data.text);
+      updates['記録票リンク'] = recordResult.url;
+      stage3aOk = true;
+    } else {
+      logError('Main', `Stage3A失敗: ${stage3a.error}`, { processId: job.processId });
+    }
+  } catch (e) {
+    logError('Main', `Stage3A例外: ${e.message}`, { processId: job.processId });
   }
 
-  const sheetResult = fillMonitoringSheet(userMaster, stage3b.data);
+  // Stage 3B: モニタリングシート
+  try {
+    const stage3b = runStage3B(extractionData, userMaster);
+    if (stage3b.success) {
+      const sheetResult = fillMonitoringSheet(userMaster, stage3b.data.parsed);
+      updates['シートリンク'] = sheetResult.url;
+      stage3bOk = true;
+    } else {
+      logError('Main', `Stage3B失敗: ${stage3b.error}`, { processId: job.processId });
+    }
+  } catch (e) {
+    logError('Main', `Stage3B例外: ${e.message}`, { processId: job.processId });
+  }
 
-  // === 完了 ===
-  updateDashboardStatus(dashboardRow, {
-    'ステータス': CONFIG.STATUS.DRAFT_READY,
-    'シートリンク': sheetResult.url,
-    '処理完了': formatDateTime()
-  });
+  // 結果に応じたステータス設定
+  if (stage3aOk && stage3bOk) {
+    updates['ステータス'] = CONFIG.STATUS.STAGE3_DONE;
+    updates['処理完了'] = formatDateTime();
+  } else if (stage3aOk || stage3bOk) {
+    updates['ステータス'] = CONFIG.STATUS.STAGE3_PARTIAL;
+    updates['処理完了'] = formatDateTime();
+    updates['エラー内容'] = stage3aOk ? 'Stage3B失敗' : 'Stage3A失敗';
+  } else {
+    updates['ステータス'] = CONFIG.STATUS.ERROR;
+    updates['エラー内容'] = 'Stage3A・Stage3Bともに失敗';
+    updates['処理完了'] = formatDateTime();
+  }
 
-  logInfo('Main', 'パイプライン完了', {
-    processId: processId,
-    user: userName,
-    recordUrl: recordResult.url,
-    sheetUrl: sheetResult.url
+  updateDashboardStatus(job.rowNumber, updates);
+
+  logInfo('Main', `Stage3完了: ${job.processId}`, {
+    stage3a: stage3aOk,
+    stage3b: stage3bOk
   });
 }
 
 
-function handleError_(processId, dashboardRow, audioFileId, errorMessage) {
+/**
+ * Drive URLからファイルIDを抽出する
+ */
+function extractFileIdFromUrl_(url) {
+  if (!url) throw new Error('URLが空です');
+  const match = url.match(/\/d\/([^/]+)\//);
+  if (match) return match[1];
+  // URLがファイルIDそのものの場合
+  return url;
+}
+
+
+/**
+ * タイムアウトしたジョブ（_RUNNING状態で一定時間経過）をQUEUEDまたは前ステージ完了に戻す
+ */
+function recoverTimedOutJobs_() {
+  const now = Date.now();
+  const runningStatuses = [
+    { status: CONFIG.STATUS.STAGE1_RUNNING, recoverTo: CONFIG.STATUS.QUEUED },
+    { status: CONFIG.STATUS.STAGE2_RUNNING, recoverTo: CONFIG.STATUS.STAGE1_DONE },
+    { status: CONFIG.STATUS.STAGE3_RUNNING, recoverTo: CONFIG.STATUS.STAGE2_DONE }
+  ];
+
+  for (let s = 0; s < runningStatuses.length; s++) {
+    const jobs = findRowsByStatus(runningStatuses[s].status);
+    for (let i = 0; i < jobs.length; i++) {
+      const updatedAt = jobs[i].updatedAt;
+      if (updatedAt) {
+        const updatedTime = new Date(updatedAt).getTime();
+        if (now - updatedTime > CONFIG.TIMEOUT_THRESHOLD_MS) {
+          logWarn('Main', `タイムアウト回復: ${jobs[i].processId} (${runningStatuses[s].status} → ${runningStatuses[s].recoverTo})`);
+          updateDashboardStatus(jobs[i].rowNumber, {
+            'ステータス': runningStatuses[s].recoverTo,
+            'エラー内容': `タイムアウト回復 (前ステータス: ${runningStatuses[s].status})`
+          });
+        }
+      }
+    }
+  }
+}
+
+
+function handleError_(processId, dashboardRow, errorMessage) {
   logError('Main', errorMessage, { processId: processId });
 
   updateDashboardStatus(dashboardRow, {
@@ -127,12 +330,6 @@ function handleError_(processId, dashboardRow, audioFileId, errorMessage) {
     'エラー内容': errorMessage,
     '処理完了': formatDateTime()
   });
-
-  try {
-    moveToError(audioFileId);
-  } catch (e) {
-    logError('Main', 'エラーフォルダへの移動にも失敗', { error: e.message });
-  }
 }
 
 
@@ -141,16 +338,18 @@ function handleError_(processId, dashboardRow, audioFileId, errorMessage) {
 // =====================================================
 
 /**
- * 特定ファイルIDを指定して処理（デバッグ・テスト用）
+ * 特定ファイルIDを指定してキュー登録（デバッグ・テスト用）
  */
 function processSpecificFile(fileId) {
   const file = DriveApp.getFileById(fileId);
-  processSingleFile({
+  enqueueFile_({
     id: file.getId(),
     name: file.getName(),
     mimeType: file.getMimeType(),
     createdDate: file.getDateCreated()
   });
+  // 登録後、即座にディスパッチ
+  dispatchNextStage_(Date.now());
 }
 
 /**
@@ -286,9 +485,10 @@ function showSummary() {
   SpreadsheetApp.getUi().alert(
     `処理状況サマリー\n\n`
     + `合計: ${summary.total}件\n`
-    + `未処理: ${summary.unprocessed}件\n`
+    + `待機中: ${summary.queued}件\n`
     + `処理中: ${summary.processing}件\n`
-    + `ドラフト完了: ${summary.draftReady}件\n`
+    + `完了: ${summary.done}件\n`
+    + `部分完了: ${summary.partial}件\n`
     + `承認済み: ${summary.approved}件\n`
     + `エラー: ${summary.error}件`
   );

@@ -23,12 +23,20 @@ const CONFIG = {
   },
 
   STATUS: {
-    UNPROCESSED: '未処理',
-    PROCESSING: '処理中',
-    DRAFT_READY: 'ドラフト完了',
-    APPROVED: '承認済み',
-    ERROR: 'エラー'
-  }
+    QUEUED:         'QUEUED',
+    STAGE1_RUNNING: 'STAGE1_RUNNING',
+    STAGE1_DONE:    'STAGE1_DONE',
+    STAGE2_RUNNING: 'STAGE2_RUNNING',
+    STAGE2_DONE:    'STAGE2_DONE',
+    STAGE3_RUNNING: 'STAGE3_RUNNING',
+    STAGE3_DONE:    'STAGE3_DONE',
+    STAGE3_PARTIAL: 'STAGE3_PARTIAL',
+    ERROR:          'ERROR',
+    APPROVED:       'APPROVED'
+  },
+
+  STAGE_TIME_LIMIT_MS: 4 * 60 * 1000,   // 4 min (2 min margin from 6 min limit)
+  TIMEOUT_THRESHOLD_MS: 30 * 60 * 1000   // 30 min timeout
 };
 
 function getApiKey() {

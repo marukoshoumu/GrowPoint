@@ -191,22 +191,58 @@ function getDashboardSummary() {
 
   const summary = {
     total: data.length - 1,
-    unprocessed: 0,
+    queued: 0,
     processing: 0,
-    draftReady: 0,
+    done: 0,
+    partial: 0,
     approved: 0,
     error: 0
   };
 
   for (let i = 1; i < data.length; i++) {
-    switch (data[i][4]) {
-      case CONFIG.STATUS.UNPROCESSED:  summary.unprocessed++; break;
-      case CONFIG.STATUS.PROCESSING:   summary.processing++; break;
-      case CONFIG.STATUS.DRAFT_READY:  summary.draftReady++; break;
-      case CONFIG.STATUS.APPROVED:     summary.approved++; break;
-      case CONFIG.STATUS.ERROR:        summary.error++; break;
+    const status = data[i][4];
+    switch (status) {
+      case CONFIG.STATUS.QUEUED:         summary.queued++; break;
+      case CONFIG.STATUS.STAGE1_RUNNING:
+      case CONFIG.STATUS.STAGE1_DONE:
+      case CONFIG.STATUS.STAGE2_RUNNING:
+      case CONFIG.STATUS.STAGE2_DONE:
+      case CONFIG.STATUS.STAGE3_RUNNING: summary.processing++; break;
+      case CONFIG.STATUS.STAGE3_DONE:    summary.done++; break;
+      case CONFIG.STATUS.STAGE3_PARTIAL: summary.partial++; break;
+      case CONFIG.STATUS.APPROVED:       summary.approved++; break;
+      case CONFIG.STATUS.ERROR:          summary.error++; break;
     }
   }
 
   return summary;
+}
+
+
+function findRowsByStatus(targetStatus) {
+  const ss = SpreadsheetApp.openById(getSpreadsheetId());
+  const sheet = ss.getSheetByName(CONFIG.SHEET_NAMES.STATUS);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const col = {};
+  headers.forEach((h, i) => { col[h] = i; });
+
+  const results = [];
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][col['ステータス']] === targetStatus) {
+      results.push({
+        rowNumber: i + 1,
+        processId: data[i][col['処理ID']],
+        userName: data[i][col['利用者名']],
+        audioFileName: data[i][col['音声ファイル']],
+        interviewDate: data[i][col['面談日']],
+        transcriptUrl: data[i][col['文字起こし']],
+        extractionUrl: data[i][col['構造化抽出']],
+        updatedAt: data[i][col['処理開始']]
+      });
+    }
+  }
+  return results;
 }
