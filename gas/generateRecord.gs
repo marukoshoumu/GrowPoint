@@ -41,7 +41,7 @@ function fillMonitoringRecord(userMaster, recordText) {
   const replacements = {
     'user_name': userMaster.name,
     'staff_name': userMaster.staff,
-    'service_manager': userMaster.serviceManager,
+    'service_manager': userMaster.manager,
     'date': userMaster.date,
     'previous_monitoring_date': userMaster.previousMonitoringDate || '初回',
     'next_monitoring_month': userMaster.nextMonitoringMonth || '',

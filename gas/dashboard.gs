@@ -156,30 +156,35 @@ function loadUserMaster(userName) {
   if (!sheet) throw new Error('利用者マスターシートが見つかりません');
 
   const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const col = {};
+  headers.forEach(function(h, i) { col[h] = i; });
 
   for (let i = 1; i < data.length; i++) {
-    if (data[i][0] === userName) {
+    if (data[i][col['利用者名']] === userName) {
+      const row = data[i];
+      const prevDate = row[col['前回モニタリング日']];
       return {
-        name: data[i][0],
-        staff: data[i][1],
-        serviceManager: data[i][2],
-        longTermGoal: data[i][3],
-        shortTermGoal1: data[i][4],
-        supportContent1: data[i][5],
-        goal1Period: data[i][6],
-        shortTermGoal2: data[i][7],
-        supportContent2: data[i][8],
-        goal2Period: data[i][9],
-        previousMonitoringDate: data[i][10] ? formatDate(new Date(data[i][10])) : '',
-        nextMonitoringMonth: data[i][11],
-        previousIssues: data[i][12],
-        attendees: data[i][13],
-        shortTermGoals: [data[i][4], data[i][7]].filter(Boolean)
+        name: row[col['利用者名']],
+        staff: row[col['担当者名']],
+        manager: row[col['サービス管理責任者']],
+        longTermGoal: row[col['長期目標']],
+        shortTermGoal1: row[col['短期目標①']],
+        supportContent1: row[col['支援内容①']],
+        goal1Period: row[col['期間①']],
+        shortTermGoal2: row[col['短期目標②']],
+        supportContent2: row[col['支援内容②']],
+        goal2Period: row[col['期間②']],
+        previousMonitoringDate: prevDate ? new Date(prevDate) : null,
+        nextMonitoringMonth: row[col['次回モニタリング予定月']],
+        previousIssues: row[col['前回の主な課題']] || '',
+        attendees: row[col['出席者']] || ''
       };
     }
   }
 
-  throw new Error(`利用者マスターに「${userName}」が見つかりません`);
+  logWarn('loadUserMaster', '利用者マスターに「' + userName + '」が見つかりません');
+  return null;
 }
 
 

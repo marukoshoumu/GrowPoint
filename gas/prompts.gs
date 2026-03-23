@@ -1,4 +1,51 @@
+function getPromptFromFile_(fileId, variables) {
+  const text = DriveApp.getFileById(fileId)
+    .getBlob().getDataAsString('UTF-8');
+  let prompt = text;
+  for (const [key, value] of Object.entries(variables)) {
+    prompt = prompt.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value || '');
+  }
+  return prompt;
+}
+
+
 function getStage1Prompt(glossaryEntries) {
+  const fileIds = getPromptFileIds();
+  if (fileIds.stage1) {
+    try {
+      const glossaryText = buildGlossaryText_(glossaryEntries);
+      return getPromptFromFile_(fileIds.stage1, {
+        glossary: glossaryText
+      });
+    } catch (e) {
+      logWarn('prompts', `Stage1プロンプトファイル読み込み失敗、ハードコード版を使用: ${e.message}`);
+    }
+  }
+  return buildStage1PromptHardcoded_(glossaryEntries);
+}
+
+
+function buildGlossaryText_(glossaryEntries) {
+  let glossaryText = '- 工賃（こうちん）→ 利用者への作業報酬\n'
+    + '- サビ管 → サービス管理責任者\n'
+    + '- B型 → 就労継続支援B型\n'
+    + '- モニタリング → 支援計画の進捗確認面談\n'
+    + '- 個別支援計画 → 利用者ごとの支援目標と方法を記載した計画書\n'
+    + '- アセスメント → 利用者の状態・ニーズの評価\n'
+    + '- 相談支援 → 相談支援事業所が作成するサービス等利用計画\n'
+    + '- 就労移行 → 就労移行支援（一般就労を目指す訓練）\n'
+    + '- A型 → 就労継続支援A型（雇用契約あり）\n'
+    + '- グループホーム / GH → 共同生活援助';
+  if (glossaryEntries && glossaryEntries.length > 0) {
+    glossaryText += '\n' + glossaryEntries.map((e) => {
+      return `- ${e.term}${e.reading ? `（${e.reading}）` : ''} → ${e.formal}`;
+    }).join('\n');
+  }
+  return glossaryText;
+}
+
+
+function buildStage1PromptHardcoded_(glossaryEntries) {
   let glossaryText = '- 工賃（こうちん）→ 利用者への作業報酬\n'
     + '- サビ管 → サービス管理責任者\n'
     + '- B型 → 就労継続支援B型\n'
@@ -73,7 +120,7 @@ function getStage2Prompt(userMaster, glossaryEntries, previousIssues) {
     + '【利用者マスター情報】\n'
     + `- 利用者名: ${userMaster.name}\n`
     + `- 担当者名: ${userMaster.staff}\n`
-    + `- 現在の短期目標: ${(userMaster.shortTermGoals || []).join('、')}\n`
+    + `- 現在の短期目標: ${[userMaster.shortTermGoal1, userMaster.shortTermGoal2].filter(Boolean).join('、')}\n`
     + `- 前回モニタリングの主な課題: ${previousIssues || '初回モニタリングのため、前回の課題なし'}\n\n`
     + '【初回モニタリングの場合】\n'
     + '- previous_issues が空の場合は「初回モニタリング」として処理してください\n'
@@ -357,7 +404,7 @@ function getStage3APrompt(userMaster, extractionJson) {
     + '【利用者マスター情報】\n'
     + `- 利用者名: ${userMaster.name}\n`
     + `- 担当者名: ${userMaster.staff}\n`
-    + `- サービス管理責任者: ${userMaster.serviceManager}\n`
+    + `- サービス管理責任者: ${userMaster.manager}\n`
     + `- 実施年月日: ${userMaster.date}\n`
     + `- 前回モニタリング実施日: ${userMaster.previousMonitoringDate || '初回'}\n`
     + `- 次回モニタリング予定月: ${userMaster.nextMonitoringMonth || ''}\n`
@@ -453,7 +500,7 @@ function getStage3BPrompt(userMaster, extractionJson) {
     + `- 利用者名: ${userMaster.name}\n`
     + `- 実施年月日: ${userMaster.date}\n`
     + `- 作成者: ${userMaster.staff}\n`
-    + `- サービス管理責任者: ${userMaster.serviceManager}\n`
+    + `- サービス管理責任者: ${userMaster.manager}\n`
     + `- 前回モニタリング実施日: ${userMaster.previousMonitoringDate || '初回'}\n`
     + `- 次回モニタリング予定月: ${userMaster.nextMonitoringMonth || ''}\n\n`
     + '【構造化抽出JSON】\n'
