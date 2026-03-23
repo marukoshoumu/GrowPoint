@@ -41,38 +41,61 @@ function appendToLogSheet_(timestamp, level, context, message, data) {
   ]);
 }
 
+function uploadToGeminiFileApi(driveFileId) {
+  const apiKey = getApiKey();
+  const file = DriveApp.getFileById(driveFileId);
+  const blob = file.getBlob();
+  const fileName = file.getName();
+  const fileSize = blob.getBytes().length;
+
+  logInfo('FileAPI', `アップロード開始: ${fileName} (${fileSize} bytes)`);
+
+  const uploadUrl = `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${apiKey}`;
+
+  const response = UrlFetchApp.fetch(uploadUrl, {
+    method: 'post',
+    contentType: blob.getContentType(),
+    payload: blob.getBytes(),
+    headers: {
+      'X-Goog-Upload-Display-Name': fileName
+    },
+    muteHttpExceptions: true
+  });
+
+  const responseCode = response.getResponseCode();
+  if (responseCode !== 200) {
+    throw new Error(`Gemini File API upload error (${responseCode}): ${response.getContentText()}`);
+  }
+
+  const result = JSON.parse(response.getContentText());
+  const fileUri = result.file.uri;
+
+  logInfo('FileAPI', `アップロード完了: ${fileUri}`);
+  return fileUri;
+}
+
 function callGeminiApi(prompt, options) {
   options = options || {};
   const apiKey = getApiKey();
   const model = options.model || CONFIG.GEMINI_MODEL;
 
   let url = CONFIG.GEMINI_API_BASE + model;
+  url += `:generateContent?key=${apiKey}`;
 
-  let contents;
-  if (options.audioFileId) {
-    url += `:generateContent?key=${apiKey}`;
-    const audioFile = DriveApp.getFileById(options.audioFileId);
-    const audioBlob = audioFile.getBlob();
-    const base64Audio = Utilities.base64Encode(audioBlob.getBytes());
-    const mimeType = audioBlob.getContentType() || 'audio/mp4';
-
-    contents = [{
-      parts: [
-        { text: prompt },
-        {
-          inline_data: {
-            mime_type: mimeType,
-            data: base64Audio
-          }
-        }
-      ]
-    }];
-  } else {
-    url += `:generateContent?key=${apiKey}`;
-    contents = [{
-      parts: [{ text: prompt }]
-    }];
+  const parts = [];
+  if (options.fileUri) {
+    parts.push({
+      fileData: {
+        mimeType: options.mimeType || 'audio/mp4',
+        fileUri: options.fileUri
+      }
+    });
   }
+  parts.push({ text: prompt });
+
+  const contents = [{
+    parts: parts
+  }];
 
   const payload = {
     contents: contents,

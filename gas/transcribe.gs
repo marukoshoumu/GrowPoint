@@ -5,8 +5,13 @@ function runStage1(audioFileId) {
     const glossary = loadGlossary();
     const prompt = getStage1Prompt(glossary);
 
+    const audioFile = DriveApp.getFileById(audioFileId);
+    const mimeType = audioFile.getBlob().getContentType() || 'audio/mp4';
+    const fileUri = uploadToGeminiFileApi(audioFileId);
+
     const transcript = callGeminiWithRetry(prompt, {
-      audioFileId: audioFileId,
+      fileUri: fileUri,
+      mimeType: mimeType,
       temperature: 0.1,
       maxTokens: 16384
     });
