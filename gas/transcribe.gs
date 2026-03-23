@@ -1,10 +1,10 @@
 function runStage1(audioFileId) {
   logInfo('Stage1', `文字起こし開始: ${audioFileId}`);
 
-  const glossary = loadGlossary();
-  const prompt = getStage1Prompt(glossary);
-
   try {
+    const glossary = loadGlossary();
+    const prompt = getStage1Prompt(glossary);
+
     const transcript = callGeminiWithRetry(prompt, {
       audioFileId: audioFileId,
       temperature: 0.1,
@@ -14,8 +14,10 @@ function runStage1(audioFileId) {
     logInfo('Stage1', `文字起こし完了: ${transcript.length}文字`);
     return {
       success: true,
-      transcript: transcript,
-      charCount: transcript.length
+      data: {
+        transcript: transcript,
+        charCount: transcript.length
+      }
     };
   } catch (e) {
     logError('Stage1', `文字起こし失敗: ${e.message}`);

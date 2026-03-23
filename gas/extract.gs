@@ -1,60 +1,70 @@
 function runStage2(transcript, userMaster) {
   logInfo('Stage2', '構造化抽出開始');
 
-  const glossary = loadGlossary();
-  const previousIssues = userMaster.previousIssues || '';
-  const prompt = getStage2Prompt(userMaster, glossary, previousIssues);
-  const fullPrompt = prompt + transcript;
+  try {
+    const glossary = loadGlossary();
+    const previousIssues = userMaster.previousIssues || '';
+    const prompt = getStage2Prompt(userMaster, glossary, previousIssues);
+    const fullPrompt = prompt + transcript;
 
-  let lastError = null;
-  let lastOutput = null;
+    let lastError = null;
+    let lastOutput = null;
 
-  for (let attempt = 0; attempt <= CONFIG.MAX_RETRIES; attempt++) {
-    try {
-      const currentPrompt = attempt === 0
-        ? fullPrompt
-        : getRetryPrompt(fullPrompt, lastError, lastOutput);
+    for (let attempt = 0; attempt <= CONFIG.MAX_RETRIES; attempt++) {
+      try {
+        const currentPrompt = attempt === 0
+          ? fullPrompt
+          : getRetryPrompt(fullPrompt, lastError, lastOutput);
 
-      const response = callGeminiWithRetry(currentPrompt, {
-        temperature: 0.1,
-        maxTokens: 16384
-      }, 0);
+        const response = callGeminiWithRetry(currentPrompt, {
+          temperature: 0.1,
+          maxTokens: 16384
+        }, 0);
 
-      lastOutput = response;
-      const parsed = parseJsonResponse(response);
-      const validation = validateStage2Output(parsed);
+        lastOutput = response;
+        const parsed = parseJsonResponse(response);
+        const validation = validateStage2Output(parsed);
 
-      if (validation.valid) {
-        logInfo('Stage2', `構造化抽出完了（試行 ${attempt + 1}回目）`, {
-          totalItems: parsed.extraction_metadata.total_items_extracted
-        });
-        return {
-          success: true,
-          data: parsed,
-          rawJson: JSON.stringify(parsed, null, 2),
-          attempts: attempt + 1
-        };
+        if (validation.valid) {
+          logInfo('Stage2', `構造化抽出完了（試行 ${attempt + 1}回目）`, {
+            totalItems: parsed.extraction_metadata.total_items_extracted
+          });
+          return {
+            success: true,
+            data: {
+              parsed: parsed,
+              rawJson: JSON.stringify(parsed, null, 2),
+              attempts: attempt + 1
+            }
+          };
+        }
+
+        lastError = validation.error;
+        logWarn('Stage2', `バリデーション失敗（試行 ${attempt + 1}）: ${validation.error}`);
+
+      } catch (e) {
+        lastError = e.message;
+        lastOutput = null;
+        logWarn('Stage2', `抽出エラー（試行 ${attempt + 1}）: ${e.message}`);
       }
 
-      lastError = validation.error;
-      logWarn('Stage2', `バリデーション失敗（試行 ${attempt + 1}）: ${validation.error}`);
-
-    } catch (e) {
-      lastError = e.message;
-      lastOutput = null;
-      logWarn('Stage2', `抽出エラー（試行 ${attempt + 1}）: ${e.message}`);
+      if (attempt < CONFIG.MAX_RETRIES) {
+        Utilities.sleep(3000);
+      }
     }
 
-    if (attempt < CONFIG.MAX_RETRIES) {
-      Utilities.sleep(3000);
-    }
+    logError('Stage2', '構造化抽出失敗（リトライ上限）', { lastError: lastError });
+    return {
+      success: false,
+      error: lastError || '構造化抽出に失敗しました'
+    };
+  } catch (e) {
+    logError('Stage2', `構造化抽出で予期しないエラー: ${e.message}`);
+    return {
+      success: false,
+      error: e.message
+    };
   }
-
-  logError('Stage2', '構造化抽出失敗（リトライ上限）', { lastError: lastError });
-  return {
-    success: false,
-    error: lastError
-  };
 }
 
 

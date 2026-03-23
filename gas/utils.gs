@@ -97,12 +97,7 @@ function callGeminiApi(prompt, options) {
   }
 
   const result = JSON.parse(response.getContentText());
-
-  if (!result.candidates || result.candidates.length === 0) {
-    throw new Error('Gemini API returned no candidates');
-  }
-
-  return result.candidates[0].content.parts[0].text;
+  return extractTextFromResponse_(result);
 }
 
 function callGeminiWithRetry(prompt, options, maxRetries) {
@@ -155,4 +150,159 @@ function saveTextToFile(folderId, fileName, content) {
   const folder = DriveApp.getFolderById(folderId);
   const blob = Utilities.newBlob(content, 'text/plain', fileName);
   return folder.createFile(blob);
+}
+
+function extractTextFromResponse_(result) {
+  if (!result.candidates || result.candidates.length === 0) {
+    throw new Error('Gemini API returned no candidates');
+  }
+
+  const candidate = result.candidates[0];
+
+  if (candidate.finishReason === 'SAFETY') {
+    throw new Error('Gemini API response blocked by safety filter (finishReason: SAFETY)');
+  }
+
+  if (!candidate.content || !candidate.content.parts || candidate.content.parts.length === 0) {
+    throw new Error('Gemini API response has no content parts');
+  }
+
+  return candidate.content.parts[0].text;
+}
+
+function test_extractTextFromResponse() {
+  let passed = 0;
+  let failed = 0;
+
+  // Test 1: Normal case - valid response returns text
+  try {
+    const validResponse = {
+      candidates: [{
+        finishReason: 'STOP',
+        content: { parts: [{ text: 'Hello, world!' }] }
+      }]
+    };
+    const text = extractTextFromResponse_(validResponse);
+    if (text === 'Hello, world!') {
+      logInfo('Test', 'PASS: Normal case - valid response returns text');
+      passed++;
+    } else {
+      logError('Test', `FAIL: Normal case - expected "Hello, world!" but got "${text}"`);
+      failed++;
+    }
+  } catch (e) {
+    logError('Test', `FAIL: Normal case - unexpected error: ${e.message}`);
+    failed++;
+  }
+
+  // Test 2: Empty candidates → throws
+  try {
+    extractTextFromResponse_({ candidates: [] });
+    logError('Test', 'FAIL: Empty candidates - did not throw');
+    failed++;
+  } catch (e) {
+    if (e.message.indexOf('no candidates') !== -1) {
+      logInfo('Test', 'PASS: Empty candidates → throws correct error');
+      passed++;
+    } else {
+      logError('Test', `FAIL: Empty candidates - wrong error: ${e.message}`);
+      failed++;
+    }
+  }
+
+  // Test 3: Missing candidates → throws
+  try {
+    extractTextFromResponse_({});
+    logError('Test', 'FAIL: Missing candidates - did not throw');
+    failed++;
+  } catch (e) {
+    if (e.message.indexOf('no candidates') !== -1) {
+      logInfo('Test', 'PASS: Missing candidates → throws correct error');
+      passed++;
+    } else {
+      logError('Test', `FAIL: Missing candidates - wrong error: ${e.message}`);
+      failed++;
+    }
+  }
+
+  // Test 4: SAFETY block → throws
+  try {
+    extractTextFromResponse_({
+      candidates: [{
+        finishReason: 'SAFETY',
+        content: { parts: [{ text: '' }] }
+      }]
+    });
+    logError('Test', 'FAIL: SAFETY block - did not throw');
+    failed++;
+  } catch (e) {
+    if (e.message.indexOf('safety filter') !== -1 || e.message.indexOf('SAFETY') !== -1) {
+      logInfo('Test', 'PASS: SAFETY block → throws correct error');
+      passed++;
+    } else {
+      logError('Test', `FAIL: SAFETY block - wrong error: ${e.message}`);
+      failed++;
+    }
+  }
+
+  // Test 5: Missing content structure → throws
+  try {
+    extractTextFromResponse_({
+      candidates: [{
+        finishReason: 'STOP',
+        content: {}
+      }]
+    });
+    logError('Test', 'FAIL: Missing content.parts - did not throw');
+    failed++;
+  } catch (e) {
+    if (e.message.indexOf('no content parts') !== -1) {
+      logInfo('Test', 'PASS: Missing content.parts → throws correct error');
+      passed++;
+    } else {
+      logError('Test', `FAIL: Missing content.parts - wrong error: ${e.message}`);
+      failed++;
+    }
+  }
+
+  // Test 6: Missing content entirely → throws
+  try {
+    extractTextFromResponse_({
+      candidates: [{
+        finishReason: 'STOP'
+      }]
+    });
+    logError('Test', 'FAIL: Missing content - did not throw');
+    failed++;
+  } catch (e) {
+    if (e.message.indexOf('no content parts') !== -1) {
+      logInfo('Test', 'PASS: Missing content → throws correct error');
+      passed++;
+    } else {
+      logError('Test', `FAIL: Missing content - wrong error: ${e.message}`);
+      failed++;
+    }
+  }
+
+  // Test 7: Empty parts array → throws
+  try {
+    extractTextFromResponse_({
+      candidates: [{
+        finishReason: 'STOP',
+        content: { parts: [] }
+      }]
+    });
+    logError('Test', 'FAIL: Empty parts - did not throw');
+    failed++;
+  } catch (e) {
+    if (e.message.indexOf('no content parts') !== -1) {
+      logInfo('Test', 'PASS: Empty parts → throws correct error');
+      passed++;
+    } else {
+      logError('Test', `FAIL: Empty parts - wrong error: ${e.message}`);
+      failed++;
+    }
+  }
+
+  logInfo('Test', `extractTextFromResponse_ テスト完了: ${passed} passed, ${failed} failed`);
 }

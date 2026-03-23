@@ -1,55 +1,65 @@
 function runStage3B(extractionData, userMaster) {
   logInfo('Stage3B', 'モニタリングシート生成開始');
 
-  const extractionJson = JSON.stringify(extractionData, null, 2);
-  const prompt = getStage3BPrompt(userMaster, extractionJson);
+  try {
+    const extractionJson = JSON.stringify(extractionData, null, 2);
+    const prompt = getStage3BPrompt(userMaster, extractionJson);
 
-  let lastError = null;
-  let lastOutput = null;
+    let lastError = null;
+    let lastOutput = null;
 
-  for (let attempt = 0; attempt <= CONFIG.MAX_RETRIES; attempt++) {
-    try {
-      const currentPrompt = attempt === 0
-        ? prompt
-        : getRetryPrompt(prompt, lastError, lastOutput);
+    for (let attempt = 0; attempt <= CONFIG.MAX_RETRIES; attempt++) {
+      try {
+        const currentPrompt = attempt === 0
+          ? prompt
+          : getRetryPrompt(prompt, lastError, lastOutput);
 
-      const response = callGeminiWithRetry(currentPrompt, {
-        temperature: 0.2,
-        maxTokens: 8192
-      }, 0);
+        const response = callGeminiWithRetry(currentPrompt, {
+          temperature: 0.2,
+          maxTokens: 8192
+        }, 0);
 
-      lastOutput = response;
-      const parsed = parseJsonResponse(response);
-      const validation = validateStage3BOutput(parsed);
+        lastOutput = response;
+        const parsed = parseJsonResponse(response);
+        const validation = validateStage3BOutput(parsed);
 
-      if (validation.valid) {
-        logInfo('Stage3B', `シートデータ生成完了（試行 ${attempt + 1}回目）`);
-        return {
-          success: true,
-          data: parsed,
-          attempts: attempt + 1
-        };
+        if (validation.valid) {
+          logInfo('Stage3B', `シートデータ生成完了（試行 ${attempt + 1}回目）`);
+          return {
+            success: true,
+            data: {
+              parsed: parsed,
+              attempts: attempt + 1
+            }
+          };
+        }
+
+        lastError = validation.error;
+        logWarn('Stage3B', `バリデーション失敗（試行 ${attempt + 1}）: ${validation.error}`);
+
+      } catch (e) {
+        lastError = e.message;
+        lastOutput = null;
+        logWarn('Stage3B', `シート生成エラー（試行 ${attempt + 1}）: ${e.message}`);
       }
 
-      lastError = validation.error;
-      logWarn('Stage3B', `バリデーション失敗（試行 ${attempt + 1}）: ${validation.error}`);
-
-    } catch (e) {
-      lastError = e.message;
-      lastOutput = null;
-      logWarn('Stage3B', `シート生成エラー（試行 ${attempt + 1}）: ${e.message}`);
+      if (attempt < CONFIG.MAX_RETRIES) {
+        Utilities.sleep(3000);
+      }
     }
 
-    if (attempt < CONFIG.MAX_RETRIES) {
-      Utilities.sleep(3000);
-    }
+    logError('Stage3B', 'モニタリングシート生成失敗（リトライ上限）', { lastError: lastError });
+    return {
+      success: false,
+      error: lastError || 'モニタリングシート生成に失敗しました'
+    };
+  } catch (e) {
+    logError('Stage3B', `モニタリングシート生成で予期しないエラー: ${e.message}`);
+    return {
+      success: false,
+      error: e.message
+    };
   }
-
-  logError('Stage3B', 'モニタリングシート生成失敗（リトライ上限）', { lastError: lastError });
-  return {
-    success: false,
-    error: lastError
-  };
 }
 
 

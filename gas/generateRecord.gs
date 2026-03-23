@@ -1,10 +1,10 @@
 function runStage3A(extractionData, userMaster) {
   logInfo('Stage3A', 'モニタリング記録票生成開始');
 
-  const extractionJson = JSON.stringify(extractionData, null, 2);
-  const prompt = getStage3APrompt(userMaster, extractionJson);
-
   try {
+    const extractionJson = JSON.stringify(extractionData, null, 2);
+    const prompt = getStage3APrompt(userMaster, extractionJson);
+
     const recordText = callGeminiWithRetry(prompt, {
       temperature: 0.2,
       maxTokens: 8192
@@ -13,7 +13,9 @@ function runStage3A(extractionData, userMaster) {
     logInfo('Stage3A', `記録票テキスト生成完了: ${recordText.length}文字`);
     return {
       success: true,
-      text: recordText
+      data: {
+        text: recordText
+      }
     };
   } catch (e) {
     logError('Stage3A', `記録票生成失敗: ${e.message}`);
