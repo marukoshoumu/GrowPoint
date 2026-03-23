@@ -74,6 +74,7 @@ function uploadToGeminiFileApi(driveFileId) {
   return fileUri;
 }
 
+// TODO(Phase 1): APIキーのローテーション検討
 function callGeminiApi(prompt, options) {
   options = options || {};
   const apiKey = getApiKey();

@@ -33,6 +33,7 @@ function runStage1(audioFileId) {
   }
 }
 
+// TODO(Phase 1): 文字起こしファイルの暗号化 or アクセス制限
 function saveTranscript(folderId, userName, date, transcript) {
   const fileName = `${date}_${userName}_文字起こし.txt`;
   const file = saveTextToFile(folderId, fileName, transcript);
