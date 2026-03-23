@@ -54,6 +54,8 @@ function fillMonitoringRecord(userMaster, recordText) {
     'goal_2_period': userMaster.goal2Period || '',
     'attendees': userMaster.attendees || '',
     'section_1_intention': sections.intention || '',
+    'section_2_goal': sections.goal || '',
+    'section_3_plan': sections.plan || '',
     'section_4_status': sections.status || '',
     'section_5_impression': sections.impression || '',
     'section_6_future': sections.future || '',
@@ -82,6 +84,8 @@ function fillMonitoringRecord(userMaster, recordText) {
 function parseRecordSections_(text) {
   const sections = {
     intention: '',
+    goal: '',
+    plan: '',
     status: '',
     impression: '',
     future: '',
@@ -90,6 +94,8 @@ function parseRecordSections_(text) {
 
   const sectionPatterns = [
     { key: 'intention',   pattern: /##\s*1\.\s*本人・家族の意向([\s\S]*?)(?=##\s*2\.|$)/  },
+    { key: 'goal',        pattern: /##\s*2\.\s*支援目標の達成状況([\s\S]*?)(?=##\s*3\.|$)/ },
+    { key: 'plan',        pattern: /##\s*3\.\s*今後の課題・方針([\s\S]*?)(?=##\s*4\.|$)/   },
     { key: 'status',      pattern: /##\s*4\.\s*支援の実施状況([\s\S]*?)(?=##\s*5\.|$)/     },
     { key: 'impression',  pattern: /##\s*5\.\s*支援を受けた感想([\s\S]*?)(?=##\s*6\.|$)/   },
     { key: 'future',      pattern: /##\s*6\.\s*今後の支援方針([\s\S]*?)(?=##\s*7\.|$)/     },

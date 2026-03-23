@@ -127,6 +127,10 @@ function executeStage1_(job) {
   let userMaster;
   try {
     userMaster = loadUserMaster(userName);
+    if (!userMaster) {
+      handleError_(job.processId, job.rowNumber, `利用者「${job.userName}」がマスターに見つかりません`);
+      return;
+    }
     userMaster.date = interviewDate;
   } catch (e) {
     handleError_(job.processId, job.rowNumber, `マスター取得失敗: ${e.message}`);
@@ -169,6 +173,10 @@ function executeStage2_(job) {
   let userMaster;
   try {
     userMaster = loadUserMaster(userName);
+    if (!userMaster) {
+      handleError_(job.processId, job.rowNumber, `利用者「${job.userName}」がマスターに見つかりません`);
+      return;
+    }
     userMaster.date = interviewDate;
   } catch (e) {
     handleError_(job.processId, job.rowNumber, `マスター取得失敗: ${e.message}`);
@@ -217,6 +225,10 @@ function executeStage3_(job) {
   let userMaster;
   try {
     userMaster = loadUserMaster(userName);
+    if (!userMaster) {
+      handleError_(job.processId, job.rowNumber, `利用者「${job.userName}」がマスターに見つかりません`);
+      return;
+    }
     userMaster.date = interviewDate;
   } catch (e) {
     handleError_(job.processId, job.rowNumber, `マスター取得失敗: ${e.message}`);

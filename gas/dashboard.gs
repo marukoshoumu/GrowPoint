@@ -140,8 +140,12 @@ function findDashboardRowByProcessId(processId) {
   const sheet = ss.getSheetByName(CONFIG.SHEET_NAMES.STATUS);
   const data = sheet.getDataRange().getValues();
 
+  const headers = data[0];
+  const col = {};
+  headers.forEach((h, i) => col[h] = i);
+
   for (let i = 1; i < data.length; i++) {
-    if (data[i][0] === processId) {
+    if (data[i][col['処理ID']] === processId) {
       return i + 1;
     }
   }
@@ -194,6 +198,10 @@ function getDashboardSummary() {
   const sheet = ss.getSheetByName(CONFIG.SHEET_NAMES.STATUS);
   const data = sheet.getDataRange().getValues();
 
+  const headers = data[0];
+  const col = {};
+  headers.forEach((h, i) => col[h] = i);
+
   const summary = {
     total: data.length - 1,
     queued: 0,
@@ -205,7 +213,7 @@ function getDashboardSummary() {
   };
 
   for (let i = 1; i < data.length; i++) {
-    const status = data[i][4];
+    const status = data[i][col['ステータス']];
     switch (status) {
       case CONFIG.STATUS.QUEUED:         summary.queued++; break;
       case CONFIG.STATUS.STAGE1_RUNNING:
