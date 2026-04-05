@@ -325,6 +325,8 @@ function getStage2FewShotExample() {
         "quote": "薬変えてもらってから、だいぶ眠れるようになったっす",
         "speaker": "利用者",
         "summary": "服薬変更後、睡眠が改善",
+        "time_context": "general",
+        "facility_name": null,
         "flags": [],
         "applicable_sections": ["monitoring_4_status"],
         "dialogue_context": null
@@ -334,8 +336,20 @@ function getStage2FewShotExample() {
         "quote": "最近は箱折りも早くなってきたんだべ",
         "speaker": "利用者",
         "summary": "箱折り作業の速度向上を実感",
+        "time_context": "current",
+        "facility_name": null,
         "flags": [],
         "applicable_sections": ["monitoring_4_status", "monitoring_5_impression", "sheet_task"],
+        "dialogue_context": null
+      }, {
+        "id": "c2-002",
+        "quote": "前の事業所でずっと封入作業やってたから、手先の作業は慣れてる",
+        "speaker": "利用者",
+        "summary": "以前の事業所で封入作業の経験があり、手先の作業に慣れている",
+        "time_context": "past_facility",
+        "facility_name": "不明",
+        "flags": [],
+        "applicable_sections": ["monitoring_4_status", "sheet_task"],
         "dialogue_context": null
       }],
       "cat3_wishes": [{
@@ -344,6 +358,8 @@ function getStage2FewShotExample() {
         "speaker": "利用者",
         "summary": "通所日数を増やしたい希望",
         "sub_type": "wish",
+        "time_context": "current",
+        "facility_name": null,
         "flags": [],
         "applicable_sections": ["monitoring_1_intention", "monitoring_6_future"],
         "dialogue_context": null
@@ -353,6 +369,8 @@ function getStage2FewShotExample() {
         "speaker": "利用者",
         "summary": "作業への前向きな感想",
         "sub_type": "satisfaction",
+        "time_context": "current",
+        "facility_name": null,
         "flags": [],
         "applicable_sections": ["monitoring_5_impression"],
         "dialogue_context": null
@@ -365,6 +383,8 @@ function getStage2FewShotExample() {
         "speaker": "対話",
         "summary": "服薬状況について曖昧な回答。確認が必要",
         "sub_type": "concern",
+        "time_context": "current",
+        "facility_name": null,
         "flags": ["要確認"],
         "applicable_sections": ["monitoring_4_status", "monitoring_7_notes"],
         "dialogue_context": "体調確認中、服薬について問われた際の反応。明確な回答を避けている印象"
@@ -374,6 +394,8 @@ function getStage2FewShotExample() {
         "quote": "じゃあ来月から週4日で試してみましょうか",
         "speaker": "支援者",
         "summary": "来月から通所日数を週4日に試行することで合意",
+        "time_context": "current",
+        "facility_name": null,
         "flags": [],
         "applicable_sections": ["monitoring_6_future"],
         "dialogue_context": null
@@ -383,6 +405,8 @@ function getStage2FewShotExample() {
         "quote": "子どもの体育祭には絶対行きたい",
         "speaker": "利用者",
         "summary": "子どもの行事への参加希望。通所スケジュールへの配慮が必要",
+        "time_context": "current",
+        "facility_name": null,
         "flags": [],
         "applicable_sections": ["monitoring_7_notes"],
         "dialogue_context": "面談終了間際、来月の予定確認中にポロッと発言"
