@@ -124,6 +124,7 @@ function transcribeChunks_(glossary, fileUri, mimeType, ranges) {
     logInfo('Stage1', `チャンク${i + 1}/${ranges.length} 文字起こし開始: ${ranges[i].startTime}-${ranges[i].endTime}`);
 
     const text = callGeminiWithRetry(prompt, {
+      model: CONFIG.CHUNK_TRANSCRIPTION_MODEL,
       fileUri: fileUri,
       mimeType: mimeType,
       temperature: 0.1,

@@ -34,7 +34,10 @@ const CONFIG = {
     APPROVED:       'APPROVED'
   },
 
-  /** Stage1 チャンク分割: 長尺音声を時間ベースで分割して文字起こし */
+  /** Stage1 チャンク分割用モデル（時間範囲指示の理解力が必要） */
+  CHUNK_TRANSCRIPTION_MODEL: 'gemini-2.5-flash',
+
+  /** Stage1 チャンク分割: 長尺音声を時間ベースで分���して文字起こし */
   CHUNK_DURATION_MIN: 10,
   CHUNK_OVERLAP_MIN: 1,
   CHUNK_SKIP_THRESHOLD_MIN: 15,
