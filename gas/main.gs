@@ -240,10 +240,16 @@ function executeStage3_(job) {
     return;
   }
 
-  const extractionFileId = extractFileIdFromUrl_(job.extractionUrl);
-  const extractionFile = DriveApp.getFileById(extractionFileId);
-  const extractionJson = extractionFile.getBlob().getDataAsString();
-  const extractionData = JSON.parse(extractionJson);
+  let extractionData;
+  try {
+    const extractionFileId = extractFileIdFromUrl_(job.extractionUrl);
+    const extractionFile = DriveApp.getFileById(extractionFileId);
+    const extractionJson = extractionFile.getBlob().getDataAsString();
+    extractionData = JSON.parse(extractionJson);
+  } catch (e) {
+    handleError_(job.processId, job.rowNumber, `抽出データ読込失敗 (${job.extractionUrl}): ${e.message}`);
+    return;
+  }
 
   let recordText = null;
   let sheetData = null;

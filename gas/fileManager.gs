@@ -16,19 +16,30 @@ function getClaimedOriginalIdSet_() {
 }
 
 function rememberClaimedOriginalId_(fileId) {
-  const props = PropertiesService.getScriptProperties();
-  let ids = [];
+  const lock = LockService.getScriptLock();
   try {
-    const raw = props.getProperty(CLAIMED_ORIGINAL_FILE_IDS_KEY_);
-    ids = raw ? JSON.parse(raw) : [];
+    lock.waitLock(5000);
   } catch (e) {
-    ids = [];
+    logWarn('FileManager', `ロック取得失敗（claimedId記録スキップ）: ${e.message}`);
+    return;
   }
-  if (!ids) ids = [];
-  ids.push(fileId);
-  const MAX = 500;
-  if (ids.length > MAX) ids = ids.slice(ids.length - MAX);
-  props.setProperty(CLAIMED_ORIGINAL_FILE_IDS_KEY_, JSON.stringify(ids));
+  try {
+    const props = PropertiesService.getScriptProperties();
+    let ids = [];
+    try {
+      const raw = props.getProperty(CLAIMED_ORIGINAL_FILE_IDS_KEY_);
+      ids = raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      ids = [];
+    }
+    if (!ids) ids = [];
+    ids.push(fileId);
+    const MAX = 500;
+    if (ids.length > MAX) ids = ids.slice(ids.length - MAX);
+    props.setProperty(CLAIMED_ORIGINAL_FILE_IDS_KEY_, JSON.stringify(ids));
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function isDrivePermissionDenied_(err) {
