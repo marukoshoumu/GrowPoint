@@ -41,7 +41,8 @@ const CONFIG = {
   STAGE_TIME_LIMIT_MS: 4 * 60 * 1000,   // 4 min (2 min margin from 6 min limit)
   TIMEOUT_THRESHOLD_MS: 30 * 60 * 1000,   // 30 min timeout
 
-  /** Stage2 構造化抽出: 出力上限 65536（JSON 切り捨て防止）。モデルは GEMINI_MODEL */
+  /** Stage2 構造化抽出: flash-liteはJSON出力サイズ制御が不安定なため、flashを使用 */
+  STAGE2_MODEL: 'gemini-2.5-flash',
   STAGE2_MAX_OUTPUT_TOKENS: 65536
 };
 

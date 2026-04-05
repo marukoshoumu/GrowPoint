@@ -218,12 +218,11 @@ function parseJsonResponse(text) {
  */
 function normalizeSheetDateForFilename_(value) {
   if (value === '' || value === null || value === undefined) return formatDate();
-  if (value instanceof Date) return formatDate(value);
+  var d = toNativeDate_(value);
+  if (d) return formatDate(d);
   if (typeof value === 'string') {
-    const t = value.trim();
+    var t = value.trim();
     if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
-    const d = new Date(t);
-    if (!isNaN(d.getTime())) return formatDate(d);
   }
   return formatDate();
 }
@@ -233,14 +232,86 @@ function formatDate(date) {
   return Utilities.formatDate(date, 'Asia/Tokyo', 'yyyy-MM-dd');
 }
 
+/**
+ * GAS の getValues() が返す Date は instanceof Date が false になる場合がある。
+ * typeof value.getTime === 'function' でダックタイピングして安全に判定する。
+ */
+function isDateLike_(value) {
+  if (value instanceof Date) return true;
+  return value !== null && typeof value === 'object'
+    && typeof value.getTime === 'function'
+    && typeof value.getMonth === 'function';
+}
+
+/** Date-like オブジェクトを確実にネイティブ Date に変換する。非日付なら null。 */
+function toNativeDate_(value) {
+  if (!value) return null;
+  if (isDateLike_(value)) {
+    var ts = value.getTime();
+    if (isNaN(ts)) return null;
+    return new Date(ts);
+  }
+  if (typeof value === 'string') {
+    var d = new Date(value);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
 function formatJapaneseDate(date) {
   if (!date) return '';
-  if (typeof date === 'string') {
-    const parsed = new Date(date);
-    if (isNaN(parsed.getTime())) return date;
-    date = parsed;
+  var d = toNativeDate_(date);
+  if (!d) {
+    // パース不能な文字列はそのまま返す（例: "令和6年"）
+    return typeof date === 'string' ? date : '';
   }
-  return Utilities.formatDate(date, 'Asia/Tokyo', 'yyyy年M月d日');
+  return Utilities.formatDate(d, 'Asia/Tokyo', 'yyyy年M月d日');
+}
+
+/**
+ * 空欄・ダッシュのみを「未入力」とみなす（前回モニタリング日など）。
+ */
+function isBlankOrDashPlaceholder_(raw) {
+  if (raw === null || raw === undefined) return true;
+  if (typeof raw === 'number' && raw === 0) return true;
+  if (typeof raw === 'string') {
+    const t = raw.replace(/\s/g, '');
+    if (t === '') return true;
+    for (let i = 0; i < t.length; i++) {
+      const code = t.charCodeAt(i);
+      if (code === 0x2D || code === 0x2010 || code === 0x2011 || code === 0x2012 ||
+          code === 0x2013 || code === 0x2014 || code === 0x2015 || code === 0xFF0D ||
+          code === 0x30FC || code === 0x2212 || code === 0xFE58 || code === 0xFE63) {
+        continue;
+      }
+      return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+/**
+ * 利用者マスター「前回モニタリング日」をパース。未入力・無効・Unix エポック(0) は null。
+ */
+function normalizePreviousMonitoringDateFromSheet_(raw) {
+  if (isBlankOrDashPlaceholder_(raw)) return null;
+  var d = toNativeDate_(raw);
+  if (!d) return null;
+  if (d.getTime() === 0) return null;
+  return d;
+}
+
+/**
+ * 期間①②: プレーンテキストはそのまま。シートが Date のときだけ yyyy年M月d日 に統一。
+ */
+function formatGoalPeriodForTemplate(value) {
+  if (value === '' || value === null || value === undefined) return '';
+  if (isDateLike_(value)) {
+    var d = toNativeDate_(value);
+    return d ? formatJapaneseDate(d) : '';
+  }
+  return String(value);
 }
 
 /**
@@ -249,15 +320,13 @@ function formatJapaneseDate(date) {
  */
 function formatNextMonitoringMonthForTemplate(value) {
   if (value === '' || value === null || value === undefined) return '';
-  if (value instanceof Date) {
-    return Utilities.formatDate(value, 'Asia/Tokyo', 'yyyy年M月');
+  var d = toNativeDate_(value);
+  if (d) {
+    return Utilities.formatDate(d, 'Asia/Tokyo', 'yyyy年M月');
   }
   if (typeof value === 'string') {
-    const t = value.trim();
-    if (!t) return '';
-    const d = new Date(t);
-    if (!isNaN(d.getTime())) return Utilities.formatDate(d, 'Asia/Tokyo', 'yyyy年M月');
-    return t;
+    var t = value.trim();
+    return t || '';
   }
   return String(value);
 }

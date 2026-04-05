@@ -255,10 +255,10 @@ function buildAllReplacements_(userMaster, recordText, sheetData) {
   r['long_term_goal'] = userMaster.longTermGoal;
   r['short_term_goal_1'] = userMaster.shortTermGoal1;
   r['support_content_1'] = userMaster.supportContent1;
-  r['goal_1_period'] = userMaster.goal1Period;
+  r['goal_1_period'] = formatGoalPeriodForTemplate(userMaster.goal1Period);
   r['short_term_goal_2'] = userMaster.shortTermGoal2 || '';
   r['support_content_2'] = userMaster.supportContent2 || '';
-  r['goal_2_period'] = userMaster.goal2Period || '';
+  r['goal_2_period'] = formatGoalPeriodForTemplate(userMaster.goal2Period || '');
   r['plan_section_4_notes'] = userMaster.planNotes || '';
 
   // --- モニタリング記録票セクション（AI生成 Stage 3-A）---

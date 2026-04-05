@@ -170,16 +170,13 @@ function loadUserMaster(userName) {
   for (let i = 1; i < data.length; i++) {
     if (data[i][col['利用者名']] === userName) {
       const row = data[i];
-      const prevDate = row[col['前回モニタリング日']];
-      const creationDate = row[col['計画作成年月日']];
-      const consentDate = row[col['同意日']];
       return {
         name: row[col['利用者名']],
         staff: row[col['担当者名']],
         manager: row[col['サービス管理責任者']],
         serviceType: row[col['サービスの種類']] || '就労継続支援B型',
-        creationDate: creationDate ? new Date(creationDate) : null,
-        consentDate: consentDate ? new Date(consentDate) : null,
+        creationDate: toNativeDate_(row[col['計画作成年月日']]),
+        consentDate: toNativeDate_(row[col['同意日']]),
         planNeeds: row[col['本人の意向']] || '',
         longTermGoal: row[col['長期目標']],
         shortTermGoal1: row[col['短期目標①']],
@@ -189,7 +186,7 @@ function loadUserMaster(userName) {
         supportContent2: row[col['支援内容②']],
         goal2Period: row[col['期間②']],
         planNotes: row[col['計画特記事項']] || '',
-        previousMonitoringDate: prevDate ? new Date(prevDate) : null,
+        previousMonitoringDate: normalizePreviousMonitoringDateFromSheet_(row[col['前回モニタリング日']]),
         nextMonitoringMonth: row[col['次回モニタリング予定月']],
         previousIssues: row[col['前回の主な課題']] || '',
         attendees: row[col['出席者']] || ''

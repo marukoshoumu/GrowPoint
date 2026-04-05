@@ -18,6 +18,7 @@ function runStage2(transcript, userMaster) {
           : getRetryPrompt(fullPrompt, lastError, lastOutput);
 
         apiText = callGeminiWithRetry(currentPrompt, {
+          model: CONFIG.STAGE2_MODEL,
           temperature: 0.1,
           maxTokens: CONFIG.STAGE2_MAX_OUTPUT_TOKENS,
           responseMimeType: 'application/json'
