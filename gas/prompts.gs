@@ -115,6 +115,8 @@ function getStage2Prompt(userMaster, glossaryEntries, previousIssues) {
         staffName: userMaster.staff,
         shortTermGoals: [userMaster.shortTermGoal1, userMaster.shortTermGoal2].filter(Boolean).join('、'),
         previousIssues: previousIssues || '初回モニタリングのため、前回の課題なし',
+        consentDate: userMaster.consentDate
+          ? formatJapaneseDate(userMaster.consentDate) : '',
         glossary: glossaryInjection,
         jsonSchema: getStage2JsonSchema(),
         fewShotExample: getStage2FewShotExample()
@@ -144,11 +146,19 @@ function buildStage2PromptHardcoded_(userMaster, glossaryEntries, previousIssues
     + '- 「対話パターン」（やり取り全体で意味が生まれるもの）も見落とさず抽出してください\n'
     + '- 発言がないカテゴリは空配列 [] としてください\n'
     + '- AIの推測・解釈は入れないでください。発言にないことは書かないでください\n\n'
+    + '【時系列の判定ルール（time_context）】\n'
+    + '各抽出項目に time_context フィールドを付与してください。\n'
+    + '- "past_facility": 「前の事業所」「以前は」「○○（施設名）では」等、過去の施設での出来事であることを示す手がかりが1つでもある場合。施設名が特定できれば facility_name に記載、不明なら "不明"\n'
+    + '- "current": 同意日以降の出来事、またはグローポイント（当事業所）での出来事と明確にわかるもの\n'
+    + '- "general": 障害特性、服薬状況、家族状況など、特定の時期や施設に依存しない継続的事実\n'
+    + '- 判断に迷い、過去施設を示す手がかりが一切ない場合は "current" とする\n'
+    + '- past_facility 以外の場合、facility_name は null\n\n'
     + '【利用者マスター情報】\n'
     + `- 利用者名: ${userMaster.name}\n`
     + `- 担当者名: ${userMaster.staff}\n`
     + `- 現在の短期目標: ${[userMaster.shortTermGoal1, userMaster.shortTermGoal2].filter(Boolean).join('、')}\n`
-    + `- 前回モニタリングの主な課題: ${previousIssues || '初回モニタリングのため、前回の課題なし'}\n\n`
+    + `- 前回モニタリングの主な課題: ${previousIssues || '初回モニタリングのため、前回の課題なし'}\n`
+    + `- 同意日（≒利用開始時期の目安）: ${userMaster.consentDate ? formatJapaneseDate(userMaster.consentDate) : '不明'}\n\n`
     + '【初回モニタリングの場合】\n'
     + '- previous_issues が空の場合は「初回モニタリング」として処理してください\n'
     + '- cross_reference_alerts の "goal_progress" は「初回のため比較基準なし」と記載してください\n'
