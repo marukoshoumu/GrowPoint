@@ -101,6 +101,43 @@ function buildChunkRanges_(durationMin) {
   return ranges;
 }
 
+function transcribeChunks_(glossary, fileUri, mimeType, ranges) {
+  const chunkTexts = [];
+
+  for (let i = 0; i < ranges.length; i++) {
+    const isFirst = (i === 0);
+    const prompt = getStage1ChunkPrompt(glossary, ranges[i].startTime, ranges[i].endTime, isFirst);
+
+    logInfo('Stage1', `チャンク${i + 1}/${ranges.length} 文字起こし開始: ${ranges[i].startTime}-${ranges[i].endTime}`);
+
+    const text = callGeminiWithRetry(prompt, {
+      fileUri: fileUri,
+      mimeType: mimeType,
+      temperature: 0.1,
+      maxTokens: CONFIG.CHUNK_MAX_TOKENS
+    });
+
+    logInfo('Stage1', `チャンク${i + 1} 完了: ${text.length}文字`);
+    chunkTexts.push(text);
+  }
+
+  return chunkTexts;
+}
+
+function mergeChunkTranscripts_(chunkTexts, ranges) {
+  logInfo('Stage1', `チャンク結合開始: ${chunkTexts.length}チャンク`);
+
+  const prompt = getMergePrompt(chunkTexts, ranges);
+
+  const merged = callGeminiWithRetry(prompt, {
+    temperature: 0.1,
+    maxTokens: CONFIG.MERGE_MAX_TOKENS
+  });
+
+  logInfo('Stage1', `チャンク結合完了: ${merged.length}文字`);
+  return merged;
+}
+
 function test_estimateDurationMin() {
   var passed = 0;
   var failed = 0;
