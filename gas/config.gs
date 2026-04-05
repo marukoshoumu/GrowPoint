@@ -34,6 +34,14 @@ const CONFIG = {
     APPROVED:       'APPROVED'
   },
 
+  /** Stage1 チャンク分割: 長尺音声を時間ベースで分割して文字起こし */
+  CHUNK_DURATION_MIN: 10,
+  CHUNK_OVERLAP_MIN: 1,
+  CHUNK_SKIP_THRESHOLD_MIN: 15,
+  BYTES_PER_MINUTE_M4A: 1000000,
+  CHUNK_MAX_TOKENS: 8192,
+  MERGE_MAX_TOKENS: 32768,
+
   STAGE_TIME_LIMIT_MS: 4 * 60 * 1000,   // 4 min (2 min margin from 6 min limit)
   TIMEOUT_THRESHOLD_MS: 30 * 60 * 1000,   // 30 min timeout
 
