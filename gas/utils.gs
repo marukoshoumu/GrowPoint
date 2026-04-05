@@ -46,7 +46,7 @@ function uploadToGeminiFileApi(driveFileId) {
   const file = DriveApp.getFileById(driveFileId);
   const blob = file.getBlob();
   const fileName = file.getName();
-  const fileSize = blob.getBytes().length;
+  const fileSize = file.getSize();
 
   logInfo('FileAPI', `アップロード開始: ${fileName} (${fileSize} bytes)`);
 
@@ -55,7 +55,7 @@ function uploadToGeminiFileApi(driveFileId) {
   const response = UrlFetchApp.fetch(uploadUrl, {
     method: 'post',
     contentType: blob.getContentType(),
-    payload: blob.getBytes(),
+    payload: blob,
     headers: {
       'X-Goog-Upload-Display-Name': fileName
     },

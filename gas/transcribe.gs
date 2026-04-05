@@ -6,7 +6,7 @@ function runStage1(audioFileId) {
     const prompt = getStage1Prompt(glossary);
 
     const audioFile = DriveApp.getFileById(audioFileId);
-    const mimeType = audioFile.getBlob().getContentType() || 'audio/mp4';
+    const mimeType = audioFile.getMimeType() || 'audio/mp4';
     const fileUri = uploadToGeminiFileApi(audioFileId);
 
     const transcript = callGeminiWithRetry(prompt, {
