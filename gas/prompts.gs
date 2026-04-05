@@ -327,7 +327,7 @@ function getStage2FewShotExample() {
       "transcript_length": "4523",
       "extraction_date": "2026-03-20",
       "low_confidence_count": "1",
-      "total_items_extracted": "9"
+      "total_items_extracted": "10"
     },
     "categories": {
       "cat1_health": [{

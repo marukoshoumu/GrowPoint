@@ -119,6 +119,7 @@ function validateStage2Output(parsed) {
   }
 
   const allCategories = requiredCategories;
+  const validTimeContexts = ['current', 'past_facility', 'general'];
   for (let c = 0; c < allCategories.length; c++) {
     const items = parsed.categories[allCategories[c]];
     for (let m = 0; m < items.length; m++) {
@@ -126,12 +127,11 @@ function validateStage2Output(parsed) {
       if (!item.id || !item.quote || !item.speaker || !item.summary) {
         return { valid: false, error: `${allCategories[c]}[${m}] に必須プロパティ不足 (id/quote/speaker/summary)` };
       }
-      var validTimeContexts = ['current', 'past_facility', 'general'];
       if (!item.time_context || validTimeContexts.indexOf(item.time_context) === -1) {
-        return { valid: false, error: allCategories[c] + '[' + m + '] の time_context が不正です（値: ' + item.time_context + '）' };
+        return { valid: false, error: `${allCategories[c]}[${m}] の time_context が不正です（値: ${item.time_context}）` };
       }
       if (item.time_context === 'past_facility' && !item.facility_name) {
-        return { valid: false, error: allCategories[c] + '[' + m + '] が past_facility ですが facility_name がありません' };
+        return { valid: false, error: `${allCategories[c]}[${m}] が past_facility ですが facility_name がありません` };
       }
       if (!item.applicable_sections || !Array.isArray(item.applicable_sections)) {
         return { valid: false, error: `${allCategories[c]}[${m}] の applicable_sections が配列ではありません` };
