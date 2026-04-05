@@ -70,3 +70,130 @@ function loadGlossary() {
     return [];
   }
 }
+
+function estimateDurationMin_(fileSize) {
+  return Math.floor(fileSize / CONFIG.BYTES_PER_MINUTE_M4A);
+}
+
+function formatMinutesToTime_(minutes) {
+  var m = Math.floor(minutes);
+  var s = Math.round((minutes - m) * 60);
+  if (s === 60) { m++; s = 0; }
+  return m + ':' + (s < 10 ? '0' : '') + s;
+}
+
+function buildChunkRanges_(durationMin) {
+  const chunk = CONFIG.CHUNK_DURATION_MIN;
+  const overlap = CONFIG.CHUNK_OVERLAP_MIN;
+  const ranges = [];
+
+  for (let start = 0; start < durationMin; start += chunk) {
+    const end = Math.min(start + chunk + overlap, durationMin);
+    if (durationMin - start <= overlap && ranges.length > 0) {
+      break;
+    }
+    ranges.push({
+      startTime: formatMinutesToTime_(start),
+      endTime: formatMinutesToTime_(end)
+    });
+  }
+
+  return ranges;
+}
+
+function test_estimateDurationMin() {
+  var passed = 0;
+  var failed = 0;
+
+  var r1 = estimateDurationMin_(34000000);
+  if (r1 === 34) { logInfo('Test', 'PASS: 34MB → 34min'); passed++; }
+  else { logError('Test', 'FAIL: 34MB → expected 34, got ' + r1); failed++; }
+
+  var r2 = estimateDurationMin_(10000000);
+  if (r2 === 10) { logInfo('Test', 'PASS: 10MB → 10min'); passed++; }
+  else { logError('Test', 'FAIL: 10MB → expected 10, got ' + r2); failed++; }
+
+  var r3 = estimateDurationMin_(0);
+  if (r3 === 0) { logInfo('Test', 'PASS: 0 bytes → 0min'); passed++; }
+  else { logError('Test', 'FAIL: 0 bytes → expected 0, got ' + r3); failed++; }
+
+  logInfo('Test', 'estimateDurationMin_ テスト完了: ' + passed + ' passed, ' + failed + ' failed');
+}
+
+function test_formatMinutesToTime() {
+  var passed = 0;
+  var failed = 0;
+
+  function check(input, expected) {
+    var result = formatMinutesToTime_(input);
+    if (result === expected) { logInfo('Test', 'PASS: ' + input + ' → ' + expected); passed++; }
+    else { logError('Test', 'FAIL: ' + input + ' → expected "' + expected + '", got "' + result + '"'); failed++; }
+  }
+
+  check(0, '0:00');
+  check(10, '10:00');
+  check(11, '11:00');
+  check(34.383, '34:23');
+  check(0.5, '0:30');
+  check(90, '90:00');
+
+  logInfo('Test', 'formatMinutesToTime_ テスト完了: ' + passed + ' passed, ' + failed + ' failed');
+}
+
+function test_buildChunkRanges() {
+  var passed = 0;
+  var failed = 0;
+
+  // 34分、10分チャンク、1分オーバーラップ → 4チャンク
+  var ranges = buildChunkRanges_(34);
+  if (ranges.length === 4) { logInfo('Test', 'PASS: 34min → 4 chunks'); passed++; }
+  else { logError('Test', 'FAIL: 34min → expected 4 chunks, got ' + ranges.length); failed++; }
+
+  if (ranges[0].startTime === '0:00' && ranges[0].endTime === '11:00') {
+    logInfo('Test', 'PASS: chunk1 = 0:00-11:00'); passed++;
+  } else {
+    logError('Test', 'FAIL: chunk1 = ' + ranges[0].startTime + '-' + ranges[0].endTime); failed++;
+  }
+
+  if (ranges[1].startTime === '10:00' && ranges[1].endTime === '21:00') {
+    logInfo('Test', 'PASS: chunk2 = 10:00-21:00'); passed++;
+  } else {
+    logError('Test', 'FAIL: chunk2 = ' + ranges[1].startTime + '-' + ranges[1].endTime); failed++;
+  }
+
+  if (ranges[2].startTime === '20:00' && ranges[2].endTime === '31:00') {
+    logInfo('Test', 'PASS: chunk3 = 20:00-31:00'); passed++;
+  } else {
+    logError('Test', 'FAIL: chunk3 = ' + ranges[2].startTime + '-' + ranges[2].endTime); failed++;
+  }
+
+  if (ranges[3].startTime === '30:00' && ranges[3].endTime === '34:00') {
+    logInfo('Test', 'PASS: chunk4 = 30:00-34:00'); passed++;
+  } else {
+    logError('Test', 'FAIL: chunk4 = ' + ranges[3].startTime + '-' + ranges[3].endTime); failed++;
+  }
+
+  // 20分 → 2チャンク
+  var ranges2 = buildChunkRanges_(20);
+  if (ranges2.length === 2) { logInfo('Test', 'PASS: 20min → 2 chunks'); passed++; }
+  else { logError('Test', 'FAIL: 20min → expected 2 chunks, got ' + ranges2.length); failed++; }
+
+  if (ranges2[0].startTime === '0:00' && ranges2[0].endTime === '11:00') {
+    logInfo('Test', 'PASS: 20min chunk1 = 0:00-11:00'); passed++;
+  } else {
+    logError('Test', 'FAIL: 20min chunk1 = ' + ranges2[0].startTime + '-' + ranges2[0].endTime); failed++;
+  }
+
+  if (ranges2[1].startTime === '10:00' && ranges2[1].endTime === '20:00') {
+    logInfo('Test', 'PASS: 20min chunk2 = 10:00-20:00'); passed++;
+  } else {
+    logError('Test', 'FAIL: 20min chunk2 = ' + ranges2[1].startTime + '-' + ranges2[1].endTime); failed++;
+  }
+
+  // 60分 → 6チャンク
+  var ranges3 = buildChunkRanges_(60);
+  if (ranges3.length === 6) { logInfo('Test', 'PASS: 60min → 6 chunks'); passed++; }
+  else { logError('Test', 'FAIL: 60min → expected 6 chunks, got ' + ranges3.length); failed++; }
+
+  logInfo('Test', 'buildChunkRanges_ テスト完了: ' + passed + ' passed, ' + failed + ' failed');
+}
