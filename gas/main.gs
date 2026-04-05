@@ -87,7 +87,8 @@ function enqueueFile_(audioFile) {
   const parsed = parseFileNameForUser(audioFile.name);
 
   // 重複チェック（取り込み前・同一ファイルID）
-  logInfo('Main', `enqueue開始: ${audioFile.name}`, { fileId: audioFile.id, owner: audioFile.driveFile ? audioFile.driveFile.getOwner().getEmail() : '不明' });
+  const ownerEmail = (function() { try { const o = audioFile.driveFile && audioFile.driveFile.getOwner(); return o ? o.getEmail() : '不明'; } catch (_) { return '取得失敗'; } })();
+  logInfo('Main', `enqueue開始: ${audioFile.name}`, { fileId: audioFile.id, owner: ownerEmail });
 
   const existingRow = findDashboardRowByProcessId(audioFile.id);
   if (existingRow !== -1) {
