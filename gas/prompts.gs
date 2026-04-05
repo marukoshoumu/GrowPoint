@@ -644,7 +644,7 @@ function buildStage3BPromptHardcoded_(userMaster, extractionJson) {
     + '- 面談中に言及がなかった項目の note は空文字列 "" にしてください。「面談中の言及なし」という文字列は入れないでください\n\n'
     + '- 【過去の事業所の情報の扱い】抽出JSONの time_context フィールドを確認し、以下のルールで記載してください：\n'
     + '  - time_context="current" → そのまま記載\n'
-    + '  - time_context="past_facility" → 「（過去：○○事業所）」と明記\n'
+    + '  - time_context="past_facility" → 「（過去：○○事業所）」と明記。facility_name が "不明" の場合は「（過去：以前の事業所）」\n'
     + '  - time_context="general" → そのまま記載\n\n'
     + '【整合性ルール】\n'
     + '本シートは、同日に生成されるモニタリング記録票と同じ面談データに基づいています。\n'
