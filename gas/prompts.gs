@@ -483,6 +483,8 @@ function getStage3APrompt(userMaster, extractionJson) {
         supportContent2: userMaster.supportContent2 || 'なし',
         goal2Period: formatGoalPeriodForTemplate(userMaster.goal2Period || ''),
         attendees: userMaster.attendees || '',
+        consentDate: userMaster.consentDate
+          ? formatJapaneseDate(userMaster.consentDate) : '',
         extractionJson: extractionJson
       });
     } catch (e) {
@@ -509,6 +511,10 @@ function buildStage3APromptHardcoded_(userMaster, extractionJson) {
     + '- AIの推測・解釈は入れないでください\n'
     + '- 「計画見直しの要否」は記載しないでください（担当者判断事項）\n'
     + '- 情報がない項目は、該当する段落を省略するか、必要最小限の「該当なし」に留めてください。「面談中の言及なし」という定型文を繰り返さないでください\n\n'
+    + '- 【過去の事業所の情報の扱い】抽出JSONの time_context フィールドを確認し、以下のルールで記載してください：\n'
+    + '  - time_context="current" → そのまま記載（グローポイントでの出来事）\n'
+    + '  - time_context="past_facility" → 「（過去：○○事業所での経験）」と明記。facility_name が "不明" の場合は「（過去：以前の事業所での経験）」\n'
+    + '  - time_context="general" → そのまま記載（継続的な事実）\n\n'
     + '【利用者マスター情報】\n'
     + `- 利用者名: ${userMaster.name}\n`
     + `- 担当者名: ${userMaster.staff}\n`
