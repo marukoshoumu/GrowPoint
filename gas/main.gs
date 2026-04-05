@@ -388,7 +388,8 @@ function processSpecificFile(fileId) {
     id: file.getId(),
     name: file.getName(),
     mimeType: file.getMimeType(),
-    createdDate: file.getDateCreated()
+    createdDate: file.getDateCreated(),
+    driveFile: file
   });
   // 登録後、即座にディスパッチ
   dispatchNextStage_(Date.now());
