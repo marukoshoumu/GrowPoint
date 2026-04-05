@@ -614,6 +614,8 @@ function getStage3BPrompt(userMaster, extractionJson) {
         previousMonitoringDate: userMaster.previousMonitoringDate
           ? formatJapaneseDate(userMaster.previousMonitoringDate) : '初回',
         nextMonitoringMonth: formatNextMonitoringMonthForTemplate(userMaster.nextMonitoringMonth) || '',
+        consentDate: userMaster.consentDate
+          ? formatJapaneseDate(userMaster.consentDate) : '',
         extractionJson: extractionJson
       });
     } catch (e) {
@@ -635,9 +637,15 @@ function buildStage3BPromptHardcoded_(userMaster, extractionJson) {
     + '盛岡市様式のモニタリングシート（就労関係）の「特記事項」と「総合所見」を作成してください。\n\n'
     + '【重要な原則】\n'
     + '- 3段階評価（1=もう少し / 2=合格 / 3=すぐれている）はAIは付与しません\n'
-    + '- 各項目の「特記事項」欄には、当該観点に関連する面談内容を**簡潔に要約**して記載します（項目に1対1で機械的に紐づけるより、職業生活全体の話題を要約してよい）\n'
+    + '- 各項目の「特記事項」欄には、monitoring_sheet_evidence の該当項目キーの evidence / note を第一根拠として、その項目に該当するエビデンスのみを簡潔に記載してください\n'
+    + '- 複数項目に同じ文章をコピペしないでください。各項目は独立した内容にしてください\n'
+    + '- evidence が空文字列の項目は note も空文字列 "" にしてください\n'
     + '- 根拠となる事実・発言は残しつつ、担当者が評価を付けられる程度の長さにまとめる\n'
     + '- 面談中に言及がなかった項目の note は空文字列 "" にしてください。「面談中の言及なし」という文字列は入れないでください\n\n'
+    + '- 【過去の事業所の情報の扱い】抽出JSONの time_context フィールドを確認し、以下のルールで記載してください：\n'
+    + '  - time_context="current" → そのまま記載\n'
+    + '  - time_context="past_facility" → 「（過去：○○事業所）」と明記\n'
+    + '  - time_context="general" → そのまま記載\n\n'
     + '【整合性ルール】\n'
     + '本シートは、同日に生成されるモニタリング記録票と同じ面談データに基づいています。\n'
     + '記録票の「4.1」「4.2」（支援の実施状況）に記載した事実と矛盾する特記事項を書かないでください。\n'
