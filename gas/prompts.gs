@@ -431,16 +431,17 @@ function getStage3APrompt(userMaster, extractionJson) {
         userName: userMaster.name,
         staffName: userMaster.staff,
         serviceManager: userMaster.manager,
-        date: userMaster.date,
-        previousMonitoringDate: userMaster.previousMonitoringDate || '初回',
-        nextMonitoringMonth: userMaster.nextMonitoringMonth || '',
+        date: formatJapaneseDate(userMaster.date) || '',
+        previousMonitoringDate: userMaster.previousMonitoringDate
+          ? formatJapaneseDate(userMaster.previousMonitoringDate) : '初回',
+        nextMonitoringMonth: formatNextMonitoringMonthForTemplate(userMaster.nextMonitoringMonth) || '',
         longTermGoal: userMaster.longTermGoal,
         shortTermGoal1: userMaster.shortTermGoal1,
         supportContent1: userMaster.supportContent1,
-        goal1Period: userMaster.goal1Period,
+        goal1Period: formatGoalPeriodForTemplate(userMaster.goal1Period),
         shortTermGoal2: userMaster.shortTermGoal2 || 'なし',
         supportContent2: userMaster.supportContent2 || 'なし',
-        goal2Period: userMaster.goal2Period || '',
+        goal2Period: formatGoalPeriodForTemplate(userMaster.goal2Period || ''),
         attendees: userMaster.attendees || '',
         extractionJson: extractionJson
       });
@@ -453,6 +454,12 @@ function getStage3APrompt(userMaster, extractionJson) {
 
 
 function buildStage3APromptHardcoded_(userMaster, extractionJson) {
+  const dateStr = formatJapaneseDate(userMaster.date) || '';
+  const prevStr = userMaster.previousMonitoringDate
+    ? formatJapaneseDate(userMaster.previousMonitoringDate) : '初回';
+  const nextStr = formatNextMonitoringMonthForTemplate(userMaster.nextMonitoringMonth) || '';
+  const goal1P = formatGoalPeriodForTemplate(userMaster.goal1Period);
+  const goal2P = formatGoalPeriodForTemplate(userMaster.goal2Period || '');
   return 'あなたは就労継続支援B型事業所の支援記録を作成するAIアシスタントです。\n\n'
     + '【タスク】\n'
     + '構造化抽出JSONと利用者マスター情報をもとに、盛岡市様式の「モニタリング記録票」を作成してください。\n\n'
@@ -466,16 +473,16 @@ function buildStage3APromptHardcoded_(userMaster, extractionJson) {
     + `- 利用者名: ${userMaster.name}\n`
     + `- 担当者名: ${userMaster.staff}\n`
     + `- サービス管理責任者: ${userMaster.manager}\n`
-    + `- 実施年月日: ${userMaster.date}\n`
-    + `- 前回モニタリング実施日: ${userMaster.previousMonitoringDate || '初回'}\n`
-    + `- 次回モニタリング予定月: ${userMaster.nextMonitoringMonth || ''}\n`
+    + `- 実施年月日: ${dateStr}\n`
+    + `- 前回モニタリング実施日: ${prevStr}\n`
+    + `- 次回モニタリング予定月: ${nextStr}\n`
     + `- 長期目標: ${userMaster.longTermGoal}\n`
     + `- 短期目標①: ${userMaster.shortTermGoal1}\n`
     + `- 短期目標①の具体的支援内容: ${userMaster.supportContent1}\n`
-    + `- 短期目標①の期間: ${userMaster.goal1Period}\n`
+    + `- 短期目標①の期間: ${goal1P}\n`
     + `- 短期目標②: ${userMaster.shortTermGoal2 || 'なし'}\n`
     + `- 短期目標②の具体的支援内容: ${userMaster.supportContent2 || 'なし'}\n`
-    + `- 短期目標②の期間: ${userMaster.goal2Period || ''}\n`
+    + `- 短期目標②の期間: ${goal2P}\n`
     + `- 出席者: ${userMaster.attendees || ''}\n\n`
     + '【構造化抽出JSON】\n'
     + extractionJson + '\n\n'
@@ -498,10 +505,10 @@ function buildStage3APromptHardcoded_(userMaster, extractionJson) {
     + '## 3. 短期目標及び具体的支援内容\n\n'
     + `①短期目標: ${userMaster.shortTermGoal1}\n`
     + `　具体的支援内容: ${userMaster.supportContent1}\n`
-    + `　期間: ${userMaster.goal1Period}\n\n`
+    + `　期間: ${goal1P}\n\n`
     + `②短期目標: ${userMaster.shortTermGoal2 || 'なし'}\n`
     + `　具体的支援内容: ${userMaster.supportContent2 || 'なし'}\n`
-    + `　期間: ${userMaster.goal2Period || ''}\n\n`
+    + `　期間: ${goal2P}\n\n`
     + '---\n\n'
     + '## 4.1 短期目標①に対する支援の実施状況\n\n'
     + 'データソース: cat1_health + cat2_work + cat4_living + cat6_staff (sub_type: "observation")\n'
@@ -555,11 +562,12 @@ function getStage3BPrompt(userMaster, extractionJson) {
     try {
       return getPromptFromFile_(fileIds.stage3b, {
         userName: userMaster.name,
-        date: userMaster.date,
+        date: formatJapaneseDate(userMaster.date) || '',
         staffName: userMaster.staff,
         serviceManager: userMaster.manager,
-        previousMonitoringDate: userMaster.previousMonitoringDate || '初回',
-        nextMonitoringMonth: userMaster.nextMonitoringMonth || '',
+        previousMonitoringDate: userMaster.previousMonitoringDate
+          ? formatJapaneseDate(userMaster.previousMonitoringDate) : '初回',
+        nextMonitoringMonth: formatNextMonitoringMonthForTemplate(userMaster.nextMonitoringMonth) || '',
         extractionJson: extractionJson
       });
     } catch (e) {
@@ -571,6 +579,10 @@ function getStage3BPrompt(userMaster, extractionJson) {
 
 
 function buildStage3BPromptHardcoded_(userMaster, extractionJson) {
+  const dateStr = formatJapaneseDate(userMaster.date) || '';
+  const prevStr = userMaster.previousMonitoringDate
+    ? formatJapaneseDate(userMaster.previousMonitoringDate) : '初回';
+  const nextStr = formatNextMonitoringMonthForTemplate(userMaster.nextMonitoringMonth) || '';
   return 'あなたは就労継続支援B型事業所のモニタリングシート（就労関係）の下書きを作成するAIアシスタントです。\n\n'
     + '【タスク】\n'
     + '構造化抽出JSONの monitoring_sheet_evidence セクションをもとに、\n'
@@ -586,11 +598,11 @@ function buildStage3BPromptHardcoded_(userMaster, extractionJson) {
     + '同じ発言を参照する場合は、表現の整合性を保ってください。\n\n'
     + '【利用者マスター情報】\n'
     + `- 利用者名: ${userMaster.name}\n`
-    + `- 実施年月日: ${userMaster.date}\n`
+    + `- 実施年月日: ${dateStr}\n`
     + `- 作成者: ${userMaster.staff}\n`
     + `- サービス管理責任者: ${userMaster.manager}\n`
-    + `- 前回モニタリング実施日: ${userMaster.previousMonitoringDate || '初回'}\n`
-    + `- 次回モニタリング予定月: ${userMaster.nextMonitoringMonth || ''}\n\n`
+    + `- 前回モニタリング実施日: ${prevStr}\n`
+    + `- 次回モニタリング予定月: ${nextStr}\n\n`
     + '【構造化抽出JSON】\n'
     + extractionJson + '\n\n'
     + '【出力フォーマット】\n\n'
@@ -659,4 +671,112 @@ function getRetryPrompt(originalPrompt, errorMessage, previousOutput) {
     + '- マークダウンのコードフェンスは付けないでください。\n\n'
     + '--- 以下、元のタスク ---\n\n'
     + originalPrompt;
+}
+
+
+function getStage1ChunkPrompt(glossaryEntries, startTime, endTime, isFirstChunk) {
+  const basePrompt = getStage1Prompt(glossaryEntries);
+
+  let chunkInstruction = '\n\n【文字起こし範囲】\n'
+    + 'この音声の ' + startTime + ' から ' + endTime + ' までの部分のみを文字起こししてください。\n'
+    + '- 指定範囲外の発言は出力しないでください\n'
+    + '- 範囲の先頭・末尾で発話の途中の場合、その発言は完結させてください\n';
+
+  if (!isFirstChunk) {
+    chunkInstruction += '- メタ情報ヘッダ（録音日時、推定録音時間、話者、音声品質、低確信度箇所数）は出力不要です。本文のみ出力してください\n';
+  }
+
+  return basePrompt + chunkInstruction;
+}
+
+
+function getMergePrompt(chunkTexts, chunkRanges) {
+  let prompt = '以下は同じ面談音声を時間帯ごとに分割して文字起こしした結果です。\n'
+    + '隣り合うチャンク間には約' + CONFIG.CHUNK_OVERLAP_MIN + '分のオーバーラップがあります。\n\n'
+    + '【タスク】\n'
+    + 'これらを1つの文字起こしテキストに統合してください。\n\n'
+    + '【ルール】\n'
+    + '1. オーバーラップ部分の重複発言を除去し、自然につなげる\n'
+    + '2. 話者ラベル（支援者: / 利用者:）を維持する\n'
+    + '3. 発言内容は一切変更・要約しない（原文をそのまま採用）\n'
+    + '4. 最初のチャンクのメタ情報ヘッダはそのまま残す\n\n';
+
+  for (let i = 0; i < chunkTexts.length; i++) {
+    prompt += '--- チャンク' + (i + 1) + ' (' + chunkRanges[i].startTime + '-' + chunkRanges[i].endTime + ') ---\n';
+    prompt += chunkTexts[i] + '\n\n';
+  }
+
+  return prompt;
+}
+
+
+function test_getStage1ChunkPrompt() {
+  var passed = 0;
+  var failed = 0;
+
+  var p1 = getStage1ChunkPrompt([], '0:00', '11:00', true);
+  if (p1.indexOf('0:00') !== -1 && p1.indexOf('11:00') !== -1) {
+    logInfo('Test', 'PASS: chunk prompt contains time range'); passed++;
+  } else {
+    logError('Test', 'FAIL: chunk prompt missing time range'); failed++;
+  }
+  if (p1.indexOf('メタ情報ヘッダ') === -1) {
+    logInfo('Test', 'PASS: first chunk does not exclude meta header'); passed++;
+  } else {
+    logError('Test', 'FAIL: first chunk should not exclude meta header'); failed++;
+  }
+
+  var p2 = getStage1ChunkPrompt([], '10:00', '21:00', false);
+  if (p2.indexOf('メタ情報ヘッダ') !== -1) {
+    logInfo('Test', 'PASS: non-first chunk excludes meta header'); passed++;
+  } else {
+    logError('Test', 'FAIL: non-first chunk should exclude meta header'); failed++;
+  }
+
+  if (p1.indexOf('福祉施設') !== -1 && p1.indexOf('話者') !== -1) {
+    logInfo('Test', 'PASS: chunk prompt includes base prompt content'); passed++;
+  } else {
+    logError('Test', 'FAIL: chunk prompt missing base prompt content'); failed++;
+  }
+
+  logInfo('Test', 'getStage1ChunkPrompt テスト完了: ' + passed + ' passed, ' + failed + ' failed');
+}
+
+function test_getMergePrompt() {
+  var passed = 0;
+  var failed = 0;
+
+  var chunks = ['チャンク1の内容', 'チャンク2の内容'];
+  var ranges = [
+    { startTime: '0:00', endTime: '11:00' },
+    { startTime: '10:00', endTime: '21:00' }
+  ];
+
+  var prompt = getMergePrompt(chunks, ranges);
+
+  if (prompt.indexOf('オーバーラップ') !== -1) {
+    logInfo('Test', 'PASS: merge prompt mentions overlap'); passed++;
+  } else {
+    logError('Test', 'FAIL: merge prompt missing overlap mention'); failed++;
+  }
+
+  if (prompt.indexOf('チャンク1の内容') !== -1 && prompt.indexOf('チャンク2の内容') !== -1) {
+    logInfo('Test', 'PASS: merge prompt includes chunk texts'); passed++;
+  } else {
+    logError('Test', 'FAIL: merge prompt missing chunk texts'); failed++;
+  }
+
+  if (prompt.indexOf('0:00-11:00') !== -1 && prompt.indexOf('10:00-21:00') !== -1) {
+    logInfo('Test', 'PASS: merge prompt includes ranges'); passed++;
+  } else {
+    logError('Test', 'FAIL: merge prompt missing ranges'); failed++;
+  }
+
+  if (prompt.indexOf('一切変更・要約しない') !== -1) {
+    logInfo('Test', 'PASS: merge prompt has no-edit rule'); passed++;
+  } else {
+    logError('Test', 'FAIL: merge prompt missing no-edit rule'); failed++;
+  }
+
+  logInfo('Test', 'getMergePrompt テスト完了: ' + passed + ' passed, ' + failed + ' failed');
 }
