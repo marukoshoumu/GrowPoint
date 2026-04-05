@@ -43,7 +43,14 @@ function isDrivePermissionDenied_(err) {
 function claimAudioForProcessing_(audioFile) {
   const folderIds = getFolderIds();
   const orig = audioFile.driveFile || DriveApp.getFileById(audioFile.id);
-  try {
+
+  // 自分所有ファイルは移動、他者所有はコピーで取り込む
+  // （他者所有ファイルを removeFile すると Drive ビューからアクセスを失うため）
+  const currentUser = Session.getEffectiveUser().getEmail();
+  const owner = orig.getOwner();
+  const isOwnFile = owner && owner.getEmail() === currentUser;
+
+  if (isOwnFile) {
     moveFileToFolderWithObj_(orig, folderIds.processing);
     return {
       id: audioFile.id,
@@ -51,31 +58,34 @@ function claimAudioForProcessing_(audioFile) {
       mimeType: audioFile.mimeType,
       createdDate: audioFile.createdDate
     };
-  } catch (e) {
-    if (!isDrivePermissionDenied_(e)) throw e;
-    const unprocessedFolder = DriveApp.getFolderById(folderIds.unprocessed);
-    const targetFolder = DriveApp.getFolderById(folderIds.processing);
-    const copy = orig.makeCopy(orig.getName(), targetFolder);
-    rememberClaimedOriginalId_(audioFile.id);
-    try {
-      unprocessedFolder.removeFile(orig);
-      logInfo('FileManager', '他者所有ファイルをコピー取り込み後、01_未処理から除去しました。', {
-        originalId: audioFile.id,
-        copyId: copy.getId()
-      });
-    } catch (removeErr) {
-      logWarn('FileManager', '01_未処理からの除去に失敗。元ファイルが残っています。', {
-        originalId: audioFile.id,
-        error: removeErr.message
-      });
-    }
-    return {
-      id: copy.getId(),
-      name: audioFile.name,
-      mimeType: copy.getMimeType(),
-      createdDate: copy.getDateCreated()
-    };
   }
+
+  // 他者所有: コピーしてから元ファイルを除去
+  const targetFolder = DriveApp.getFolderById(folderIds.processing);
+  const copy = orig.makeCopy(orig.getName(), targetFolder);
+  rememberClaimedOriginalId_(audioFile.id);
+  logInfo('FileManager', '他者所有ファイルをコピーで取り込み', {
+    originalId: audioFile.id,
+    copyId: copy.getId(),
+    owner: owner ? owner.getEmail() : '不明'
+  });
+
+  try {
+    const unprocessedFolder = DriveApp.getFolderById(folderIds.unprocessed);
+    unprocessedFolder.removeFile(orig);
+  } catch (removeErr) {
+    logWarn('FileManager', '01_未処理からの除去に失敗。元ファイルが残っています。', {
+      originalId: audioFile.id,
+      error: removeErr.message
+    });
+  }
+
+  return {
+    id: copy.getId(),
+    name: audioFile.name,
+    mimeType: copy.getMimeType(),
+    createdDate: copy.getDateCreated()
+  };
 }
 
 function detectNewAudioFiles() {
