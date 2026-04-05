@@ -9,7 +9,7 @@ function fillTemplate(templateId, replacements, outputFolderId, fileName) {
   const keys = Object.keys(replacements);
   for (let i = 0; i < keys.length; i++) {
     const placeholder = keys[i];
-    const value = replacements[placeholder] || '';
+    const value = replacementValueForTemplate_(replacements[placeholder]);
     body.replaceText(`\\{\\{${escapeRegex_(placeholder)}\\}\\}`, value);
   }
 
@@ -28,7 +28,7 @@ function fillTemplate(templateId, replacements, outputFolderId, fileName) {
 
         for (let i = 0; i < keys.length; i++) {
           const placeholder = keys[i];
-          const value = replacements[placeholder] || '面談中の言及なし';
+          const value = replacementValueForTemplate_(replacements[placeholder]);
           cell.replaceText(`\\{\\{${escapeRegex_(placeholder)}\\}\\}`, value);
         }
       }
@@ -51,6 +51,12 @@ function fillTemplate(templateId, replacements, outputFolderId, fileName) {
 
 function escapeRegex_(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** 未設定は空欄。数値評価などは文字列化する（テーブルでも「面談中の言及なし」にしない）。 */
+function replacementValueForTemplate_(raw) {
+  if (raw === undefined || raw === null) return '';
+  return String(raw);
 }
 
 
@@ -78,9 +84,10 @@ function verifyTemplate(templateId) {
       charCount: text.length
     };
   } catch (e) {
+    const errMsg = e && e.message ? e.message : String(e);
     return {
       success: false,
-      error: e.message
+      error: errMsg
     };
   }
 }
@@ -90,16 +97,10 @@ function listTemplatePlaceholders() {
   const templateIds = getTemplateIds();
   const results = {};
 
-  if (templateIds.monitoringRecord) {
-    results.monitoringRecord = verifyTemplate(templateIds.monitoringRecord);
+  if (templateIds.monitoringDocument) {
+    results.monitoringDocument = verifyTemplate(templateIds.monitoringDocument);
   } else {
-    results.monitoringRecord = { valid: false, error: 'テンプレートID未設定' };
-  }
-
-  if (templateIds.monitoringSheet) {
-    results.monitoringSheet = verifyTemplate(templateIds.monitoringSheet);
-  } else {
-    results.monitoringSheet = { valid: false, error: 'テンプレートID未設定' };
+    results.monitoringDocument = { success: false, error: 'テンプレートID未設定 (TEMPLATE_ID_MONITORING_DOCUMENT)' };
   }
 
   return results;

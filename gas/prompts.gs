@@ -207,6 +207,11 @@ function buildStage2PromptHardcoded_(userMaster, glossaryEntries, previousIssues
     + '5. 推測・解釈を入れていないか？（発言にないことを書いていないか？）\n'
     + '6. cat8（未分類）に入れるべき発言を無理に他カテゴリに押し込んでいないか？\n'
     + '7. monitoring_sheet_evidence で、面談中に言及がなかった項目のevidenceは空文字列になっているか？\n\n'
+    + '【JSON出力の厳密なルール】\n'
+    + '- 出力はパース可能なJSONオブジェクト1個のみ。説明文・markdown・コードフェンスは付けない。\n'
+    + '- 文字列値内のダブルクォートは \\" にエスケープする。改行は \\n。\n'
+    + '- quote フィールドの発言原文は、可能なら「」『』で表記し、生の " を含めない（含む場合は必ず \\"）。\n'
+    + '- 【重要・サイズ】各 quote は150文字以内（長い場合は要約）。各 summary は220文字以内。各カテゴリ配列は重要度順に最大15件まで（それ以上は省略）。出力が長すぎるとAPI上限で切れ不正JSONになります。\n\n'
     + '【面談文字起こし全文】\n\n';
 }
 
@@ -380,29 +385,29 @@ function getStage2FewShotExample() {
     "monitoring_sheet_evidence": {
       "work_life": {
         "attendance": { "evidence": "「最近は休まず来れてる」との発言あり", "suggested_rating": null, "note": "" },
-        "punctuality": { "evidence": "", "suggested_rating": null, "note": "面談中の言及なし" },
+        "punctuality": { "evidence": "", "suggested_rating": null, "note": "" },
         "health_management": { "evidence": "服薬変更後の睡眠改善を報告。ただし服薬状況に曖昧な回答あり", "suggested_rating": null, "note": "要確認" },
-        "appearance": { "evidence": "", "suggested_rating": null, "note": "面談中の言及なし" },
-        "rule_compliance": { "evidence": "", "suggested_rating": null, "note": "面談中の言及なし" },
-        "reporting": { "evidence": "", "suggested_rating": null, "note": "面談中の言及なし" },
-        "workspace_tidiness": { "evidence": "", "suggested_rating": null, "note": "面談中の言及なし" },
+        "appearance": { "evidence": "", "suggested_rating": null, "note": "" },
+        "rule_compliance": { "evidence": "", "suggested_rating": null, "note": "" },
+        "reporting": { "evidence": "", "suggested_rating": null, "note": "" },
+        "workspace_tidiness": { "evidence": "", "suggested_rating": null, "note": "" },
         "work_attitude": { "evidence": "「作業も楽しくなってきた」との発言あり", "suggested_rating": null, "note": "" },
         "concentration": { "evidence": "「薬変えてから集中できるようになった」との発言あり", "suggested_rating": null, "note": "" },
-        "persistence": { "evidence": "", "suggested_rating": null, "note": "面談中の言及なし" }
+        "persistence": { "evidence": "", "suggested_rating": null, "note": "" }
       },
       "relationships": {
-        "greeting": { "evidence": "", "suggested_rating": null, "note": "面談中の言及なし" },
-        "conversation": { "evidence": "", "suggested_rating": null, "note": "面談中の言及なし" },
-        "understanding_hierarchy": { "evidence": "", "suggested_rating": null, "note": "面談中の言及なし" },
-        "emotional_control": { "evidence": "", "suggested_rating": null, "note": "面談中の言及なし" },
-        "stress_management": { "evidence": "", "suggested_rating": null, "note": "面談中の言及なし" }
+        "greeting": { "evidence": "", "suggested_rating": null, "note": "" },
+        "conversation": { "evidence": "", "suggested_rating": null, "note": "" },
+        "understanding_hierarchy": { "evidence": "", "suggested_rating": null, "note": "" },
+        "emotional_control": { "evidence": "", "suggested_rating": null, "note": "" },
+        "stress_management": { "evidence": "", "suggested_rating": null, "note": "" }
       },
       "tasks": {
         "physical_stamina": { "evidence": "週4日への増加希望は体力面の自信を示唆", "suggested_rating": null, "note": "" },
-        "instruction_compliance": { "evidence": "", "suggested_rating": null, "note": "面談中の言及なし" },
-        "quality": { "evidence": "", "suggested_rating": null, "note": "面談中の言及なし" },
+        "instruction_compliance": { "evidence": "", "suggested_rating": null, "note": "" },
+        "quality": { "evidence": "", "suggested_rating": null, "note": "" },
         "speed": { "evidence": "「箱折りも早くなってきた」との発言あり", "suggested_rating": null, "note": "" },
-        "safety_awareness": { "evidence": "", "suggested_rating": null, "note": "面談中の言及なし" }
+        "safety_awareness": { "evidence": "", "suggested_rating": null, "note": "" }
       }
     },
     "cross_reference_alerts": [{
@@ -456,7 +461,7 @@ function buildStage3APromptHardcoded_(userMaster, extractionJson) {
     + '- 発言の原文を活かしつつ、記録として適切な文体に整えてください\n'
     + '- AIの推測・解釈は入れないでください\n'
     + '- 「計画見直しの要否」は記載しないでください（担当者判断事項）\n'
-    + '- 情報がない項目は「面談中の言及なし」と明記してください\n\n'
+    + '- 情報がない項目は、該当する段落を省略するか、必要最小限の「該当なし」に留めてください。「面談中の言及なし」という定型文を繰り返さないでください\n\n'
     + '【利用者マスター情報】\n'
     + `- 利用者名: ${userMaster.name}\n`
     + `- 担当者名: ${userMaster.staff}\n`
@@ -476,7 +481,8 @@ function buildStage3APromptHardcoded_(userMaster, extractionJson) {
     + extractionJson + '\n\n'
     + '【出力フォーマット — モニタリング記録票】\n\n'
     + '以下のセクションごとに記載してください。\n'
-    + 'JSONの applicable_sections を参照し、該当する抽出項目を適切なセクションに配置してください。\n\n'
+    + 'JSONの applicable_sections を参照し、該当する抽出項目を適切なセクションに配置してください。\n'
+    + '（セクションの区切りは ## 見出しのみ。行が `---` だけの区切り線は出力しない。指示文にあった `---` は書式例であり、最終出力に含めない。）\n\n'
     + '---\n\n'
     + '## 1. 本人・家族の意向\n\n'
     + 'データソース: cat3_wishes (sub_type: "wish") + cat5_family\n'
@@ -484,7 +490,7 @@ function buildStage3APromptHardcoded_(userMaster, extractionJson) {
     + '【本人の意向】\n'
     + '（cat3_wishesのうち sub_type="wish" の項目を、利用者の言葉を活かして記載）\n\n'
     + '【家族の意向】\n'
-    + '（cat5_family の項目を記載。言及がなければ「今回の面談では家族の意向に関する言及なし」）\n\n'
+    + '（cat5_family の項目を記載。言及がなければ本項の本文は省略してよい）\n\n'
     + '---\n\n'
     + '## 2. 長期目標\n\n'
     + userMaster.longTermGoal + '\n\n'
@@ -497,15 +503,20 @@ function buildStage3APromptHardcoded_(userMaster, extractionJson) {
     + `　具体的支援内容: ${userMaster.supportContent2 || 'なし'}\n`
     + `　期間: ${userMaster.goal2Period || ''}\n\n`
     + '---\n\n'
-    + '## 4. 支援の実施状況（短期目標及び具体的支援内容に対しての支援状況）\n\n'
+    + '## 4.1 短期目標①に対する支援の実施状況\n\n'
     + 'データソース: cat1_health + cat2_work + cat4_living + cat6_staff (sub_type: "observation")\n'
-    + 'applicable_sections: "monitoring_4_status"\n\n'
-    + `【短期目標①「${userMaster.shortTermGoal1}」に対する状況】\n`
-    + '（目標に関連する抽出項目を統合して記載。具体的な発言を引用しつつ、状況を描写）\n\n'
-    + `【短期目標②「${userMaster.shortTermGoal2 || ''}」に対する状況】\n`
-    + '（同上）\n\n'
+    + 'applicable_sections: "monitoring_4_status"（短期目標①に紐づく抽出のみ）\n\n'
+    + `対象の短期目標①: ${userMaster.shortTermGoal1}\n`
+    + '（この目標・支援内容に対して、面談で示された支援の実施状況を記載。具体的な発言を引用しつつ描写）\n\n'
+    + '---\n\n'
+    + '## 4.2 短期目標②に対する支援の実施状況\n\n'
+    + 'データソース: 同上（短期目標②に紐づく抽出）\n'
+    + 'applicable_sections: "monitoring_4_status"（短期目標②に紐づく抽出のみ）\n\n'
+    + `対象の短期目標②: ${userMaster.shortTermGoal2 || '（未設定）'}\n`
+    + '（短期目標②が未設定・空の場合は「該当なし」と明記し、本文は空欄相当の一文に留める）\n'
+    + '（設定がある場合は、①と同様に記載）\n\n'
     + '【その他の状況（身体面・生活面）】\n'
-    + '（短期目標に直接関連しないが記録すべき情報）\n\n'
+    + '（いずれの短期目標にも直接紐づかないが記録すべき情報があれば、4.1 または 4.2 の末尾に追記してよい）\n\n'
     + '---\n\n'
     + '## 5. 支援を受けた感想（本人の満足度，達成度，今後の希望等）\n\n'
     + 'データソース: cat3_wishes (sub_type: "satisfaction" | "impression" | "complaint")\n'
@@ -566,12 +577,12 @@ function buildStage3BPromptHardcoded_(userMaster, extractionJson) {
     + '盛岡市様式のモニタリングシート（就労関係）の「特記事項」と「総合所見」を作成してください。\n\n'
     + '【重要な原則】\n'
     + '- 3段階評価（1=もう少し / 2=合格 / 3=すぐれている）はAIは付与しません\n'
-    + '- 各項目の「特記事項」欄に、面談から得られた根拠情報のみを記載します\n'
-    + '- 担当者がこの根拠を見て評価を付けるための「判断材料」を提供する立場です\n'
-    + '- 面談中に言及がなかった項目は「面談中の言及なし」と記載してください\n\n'
+    + '- 各項目の「特記事項」欄には、当該観点に関連する面談内容を**簡潔に要約**して記載します（項目に1対1で機械的に紐づけるより、職業生活全体の話題を要約してよい）\n'
+    + '- 根拠となる事実・発言は残しつつ、担当者が評価を付けられる程度の長さにまとめる\n'
+    + '- 面談中に言及がなかった項目の note は空文字列 "" にしてください。「面談中の言及なし」という文字列は入れないでください\n\n'
     + '【整合性ルール】\n'
     + '本シートは、同日に生成されるモニタリング記録票と同じ面談データに基づいています。\n'
-    + '記録票の「4. 支援の実施状況」に記載した事実と矛盾する特記事項を書かないでください。\n'
+    + '記録票の「4.1」「4.2」（支援の実施状況）に記載した事実と矛盾する特記事項を書かないでください。\n'
     + '同じ発言を参照する場合は、表現の整合性を保ってください。\n\n'
     + '【利用者マスター情報】\n'
     + `- 利用者名: ${userMaster.name}\n`
@@ -626,15 +637,26 @@ function buildStage3BPromptHardcoded_(userMaster, extractionJson) {
 
 
 function getRetryPrompt(originalPrompt, errorMessage, previousOutput) {
+  let sample = '（出力なし）';
+  if (previousOutput) {
+    if (previousOutput.length <= 4000) {
+      sample = previousOutput;
+    } else {
+      sample = previousOutput.substring(0, 2000)
+        + '\n\n... (中略) ...\n\n'
+        + previousOutput.substring(previousOutput.length - 2000);
+    }
+  }
+
   return '前回の出力でエラーが発生しました。以下の点を修正して再度出力してください。\n\n'
     + '【エラー内容】\n'
     + errorMessage + '\n\n'
-    + '【前回の出力（問題があった部分）】\n'
-    + (previousOutput ? previousOutput.substring(0, 500) : '（出力なし）') + '\n\n'
-    + '【重要】\n'
-    + '- 必ず有効なJSONのみを出力してください\n'
-    + '- マークダウンのコードブロック（```json ... ```）で囲んでも構いません\n'
-    + '- JSON以外のテキストは含めないでください\n\n'
+    + '【前回の出力（先頭・末尾。JSONパース失敗時は短く再出力すること）】\n'
+    + sample + '\n\n'
+    + '【リトライ時の追加ルール】\n'
+    + '- 必ず有効なJSON1個のみ（application/json 想定）。\n'
+    + '- Unterminated string / パース失敗が続く場合: quote を各100文字以内に短縮、各カテゴリは最大10件、monitoring_sheet_evidence の長文は要約。\n'
+    + '- マークダウンのコードフェンスは付けないでください。\n\n'
     + '--- 以下、元のタスク ---\n\n'
     + originalPrompt;
 }

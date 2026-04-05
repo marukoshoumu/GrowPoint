@@ -85,24 +85,24 @@ function dispatchNextStage_(startTime) {
  */
 function enqueueFile_(audioFile) {
   const parsed = parseFileNameForUser(audioFile.name);
-  const processId = audioFile.id;
 
-  // 重複チェック
-  const existingRow = findDashboardRowByProcessId(processId);
+  // 重複チェック（取り込み前・同一ファイルID）
+  const existingRow = findDashboardRowByProcessId(audioFile.id);
   if (existingRow !== -1) {
-    logInfo('Main', `重複スキップ: ${audioFile.name} (${processId})`);
+    logInfo('Main', `重複スキップ: ${audioFile.name} (${audioFile.id})`);
     return;
   }
 
-  moveToProcessing(audioFile.id);
+  const claimed = claimAudioForProcessing_(audioFile);
+  const processId = claimed.id;
 
   const dashboardRow = addDashboardRow(
-    processId, parsed.userName, parsed.date, audioFile.name, CONFIG.STATUS.QUEUED
+    processId, parsed.userName, parsed.date, claimed.name, CONFIG.STATUS.QUEUED
   );
 
   logInfo('Main', 'キュー登録完了', {
     processId: processId,
-    file: audioFile.name,
+    file: claimed.name,
     user: parsed.userName,
     date: parsed.date,
     row: dashboardRow
@@ -211,7 +211,7 @@ function executeStage2_(job) {
 
 
 /**
- * Stage 3: 記録票(3A)とシート(3B)を独立に実行
+ * Stage 3: 記録票(3A)とシート(3B)を生成し、1つのテンプレートに統合差し込み
  */
 function executeStage3_(job) {
   logInfo('Main', `Stage3開始: ${job.processId}`);
@@ -235,22 +235,21 @@ function executeStage3_(job) {
     return;
   }
 
-  // 抽出JSONファイルを読み込む
   const extractionFileId = extractFileIdFromUrl_(job.extractionUrl);
   const extractionFile = DriveApp.getFileById(extractionFileId);
   const extractionJson = extractionFile.getBlob().getDataAsString();
   const extractionData = JSON.parse(extractionJson);
 
+  let recordText = null;
+  let sheetData = null;
   let stage3aOk = false;
   let stage3bOk = false;
-  const updates = {};
 
-  // Stage 3A: モニタリング記録票
+  // Stage 3-A: 記録票テキスト生成
   try {
     const stage3a = runStage3A(extractionData, userMaster);
     if (stage3a.success) {
-      const recordResult = fillMonitoringRecord(userMaster, stage3a.data.text);
-      updates['記録票リンク'] = recordResult.url;
+      recordText = stage3a.data.text;
       stage3aOk = true;
     } else {
       logError('Main', `Stage3A失敗: ${stage3a.error}`, { processId: job.processId });
@@ -259,12 +258,11 @@ function executeStage3_(job) {
     logError('Main', `Stage3A例外: ${e.message}`, { processId: job.processId });
   }
 
-  // Stage 3B: モニタリングシート
+  // Stage 3-B: シートJSON生成
   try {
     const stage3b = runStage3B(extractionData, userMaster);
     if (stage3b.success) {
-      const sheetResult = fillMonitoringSheet(userMaster, stage3b.data.parsed);
-      updates['シートリンク'] = sheetResult.url;
+      sheetData = stage3b.data.parsed;
       stage3bOk = true;
     } else {
       logError('Main', `Stage3B失敗: ${stage3b.error}`, { processId: job.processId });
@@ -273,14 +271,20 @@ function executeStage3_(job) {
     logError('Main', `Stage3B例外: ${e.message}`, { processId: job.processId });
   }
 
-  // 結果に応じたステータス設定
-  if (stage3aOk && stage3bOk) {
-    updates['ステータス'] = CONFIG.STATUS.STAGE3_DONE;
+  const updates = {};
+
+  if (stage3aOk || stage3bOk) {
+    // 1つのテンプレートに統合差し込み（部分成功でも出力する）
+    const docResult = fillMonitoringDocument(userMaster, recordText, sheetData);
+    updates['ドキュメントリンク'] = docResult.url;
+
+    if (stage3aOk && stage3bOk) {
+      updates['ステータス'] = CONFIG.STATUS.STAGE3_DONE;
+    } else {
+      updates['ステータス'] = CONFIG.STATUS.STAGE3_PARTIAL;
+      updates['エラー内容'] = stage3aOk ? 'Stage3B失敗（シート部分空欄）' : 'Stage3A失敗（記録票部分空欄）';
+    }
     updates['処理完了'] = formatDateTime();
-  } else if (stage3aOk || stage3bOk) {
-    updates['ステータス'] = CONFIG.STATUS.STAGE3_PARTIAL;
-    updates['処理完了'] = formatDateTime();
-    updates['エラー内容'] = stage3aOk ? 'Stage3B失敗' : 'Stage3A失敗';
   } else {
     updates['ステータス'] = CONFIG.STATUS.ERROR;
     updates['エラー内容'] = 'Stage3A・Stage3Bともに失敗';
@@ -289,10 +293,28 @@ function executeStage3_(job) {
 
   updateDashboardStatus(job.rowNumber, updates);
 
+  if (stage3aOk || stage3bOk) {
+    tryArchiveAudioToExtractedFolder_(job.processId, userName, interviewDate);
+  }
+
   logInfo('Main', `Stage3完了: ${job.processId}`, {
     stage3a: stage3aOk,
     stage3b: stage3bOk
   });
+}
+
+/**
+ * 処理完了後、元音声を 02_処理中 から 03 の利用者サブフォルダへ移動（文字起こし・抽出と同じ場所）
+ */
+function tryArchiveAudioToExtractedFolder_(audioFileId, userName, interviewDate) {
+  try {
+    const folderIds = getFolderIds();
+    const archiveFolder = createUserProcessingFolder(folderIds.extracted, userName, interviewDate);
+    moveFileToFolder(audioFileId, archiveFolder.getId());
+    logInfo('Main', `元音声を 03 配下へ移動: ${archiveFolder.getName()}`);
+  } catch (e) {
+    logWarn('Main', `元音声の移動をスキップ（02に残る可能性）: ${e.message}`);
+  }
 }
 
 
@@ -415,9 +437,34 @@ function initialSetup() {
 }
 
 
+/**
+ * フォルダ関連のスクリプトプロパティをすべて削除（Drive 手動削除後に古いIDが残る場合の対策）
+ */
+function clearFolderScriptProperties_() {
+  const props = PropertiesService.getScriptProperties();
+  const keys = [
+    'FOLDER_ID_ROOT',
+    'FOLDER_ID_MASTER',
+    'FOLDER_ID_UNPROCESSED',
+    'FOLDER_ID_PROCESSING',
+    'FOLDER_ID_EXTRACTED',
+    'FOLDER_ID_DRAFT',
+    'FOLDER_ID_APPROVED',
+    'FOLDER_ID_ERROR'
+  ];
+  for (let i = 0; i < keys.length; i++) {
+    props.deleteProperty(keys[i]);
+  }
+}
 function setupFolderStructure() {
   const props = PropertiesService.getScriptProperties();
   let rootId = props.getProperty('FOLDER_ID_ROOT');
+
+  if (rootId && !folderExists_(rootId)) {
+    logWarn('Setup', '保存済みルートフォルダがDrive上にありません。フォルダIDをクリアして再作成します。');
+    clearFolderScriptProperties_();
+    rootId = null;
+  }
 
   if (!rootId) {
     const rootFolder = DriveApp.createFolder(CONFIG.FOLDER_NAMES.ROOT);
@@ -427,7 +474,6 @@ function setupFolderStructure() {
   }
 
   const folderMap = {
-    'FOLDER_ID_MASTER': CONFIG.FOLDER_NAMES.MASTER,
     'FOLDER_ID_UNPROCESSED': CONFIG.FOLDER_NAMES.UNPROCESSED,
     'FOLDER_ID_PROCESSING': CONFIG.FOLDER_NAMES.PROCESSING,
     'FOLDER_ID_EXTRACTED': CONFIG.FOLDER_NAMES.EXTRACTED,
@@ -439,8 +485,12 @@ function setupFolderStructure() {
   const keys = Object.keys(folderMap);
   for (let i = 0; i < keys.length; i++) {
     const propKey = keys[i];
-    const existing = props.getProperty(propKey);
-    if (!existing) {
+    let subId = props.getProperty(propKey);
+    if (!subId || !folderExists_(subId)) {
+      if (subId) {
+        logWarn('Setup', `サブフォルダIDが無効のため再作成: ${folderMap[propKey]}`);
+        props.deleteProperty(propKey);
+      }
       const folder = createSubfolder(rootId, folderMap[propKey]);
       props.setProperty(propKey, folder.getId());
       logInfo('Setup', `サブフォルダ作成: ${folderMap[propKey]} (${folder.getId()})`);
@@ -458,7 +508,7 @@ function setupTrigger() {
   }
 
   ScriptApp.newTrigger('processNewFiles')
-    .timeDriven()
+    .timeBased()
     .everyMinutes(CONFIG.POLL_INTERVAL_MINUTES)
     .create();
 
@@ -515,20 +565,13 @@ function showTemplateStatus() {
   const status = listTemplatePlaceholders();
   let msg = 'テンプレート状況\n\n';
 
-  msg += '【モニタリング記録票】\n';
-  if (status.monitoringRecord.valid) {
-    msg += `  OK: ${status.monitoringRecord.name}\n`;
-    msg += `  プレースホルダ: ${status.monitoringRecord.placeholders.join(', ')}\n`;
+  msg += '【計画モニタ（統合テンプレート）】\n';
+  if (status.monitoringDocument.success) {
+    msg += `  OK: ${status.monitoringDocument.name}\n`;
+    msg += `  プレースホルダ数: ${status.monitoringDocument.placeholderCount}\n`;
+    msg += `  プレースホルダ: ${status.monitoringDocument.placeholders.join(', ')}\n`;
   } else {
-    msg += `  NG: ${status.monitoringRecord.error}\n`;
-  }
-
-  msg += '\n【モニタリングシート】\n';
-  if (status.monitoringSheet.valid) {
-    msg += `  OK: ${status.monitoringSheet.name}\n`;
-    msg += `  プレースホルダ: ${status.monitoringSheet.placeholders.join(', ')}\n`;
-  } else {
-    msg += `  NG: ${status.monitoringSheet.error}\n`;
+    msg += `  NG: ${status.monitoringDocument.error}\n`;
   }
 
   SpreadsheetApp.getUi().alert(msg);

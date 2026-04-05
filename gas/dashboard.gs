@@ -1,7 +1,7 @@
 const DASHBOARD_HEADERS = [
   '処理ID', '利用者名', '面談日', '音声ファイル',
   'ステータス', '文字起こし', '構造化抽出',
-  '記録票リンク', 'シートリンク', '処理開始', '処理完了',
+  'ドキュメントリンク', '処理開始', '処理完了',
   'エラー内容', '担当者承認'
 ];
 
@@ -39,8 +39,11 @@ function initUserMasterSheet_(ss) {
   sheet = ss.insertSheet(CONFIG.SHEET_NAMES.USER_MASTER);
   const headers = [
     '利用者名', '担当者名', 'サービス管理責任者',
-    '長期目標', '短期目標①', '支援内容①', '期間①',
+    'サービスの種類', '計画作成年月日', '同意日',
+    '本人の意向', '長期目標',
+    '短期目標①', '支援内容①', '期間①',
     '短期目標②', '支援内容②', '期間②',
+    '計画特記事項',
     '前回モニタリング日', '次回モニタリング予定月',
     '前回の主な課題', '出席者'
   ];
@@ -104,7 +107,7 @@ function addDashboardRow(processId, userName, interviewDate, audioFileName, stat
     interviewDate,
     audioFileName,
     status,
-    '', '', '', '',
+    '', '', '',
     formatDateTime(),
     '', '', ''
   ];
@@ -168,10 +171,16 @@ function loadUserMaster(userName) {
     if (data[i][col['利用者名']] === userName) {
       const row = data[i];
       const prevDate = row[col['前回モニタリング日']];
+      const creationDate = row[col['計画作成年月日']];
+      const consentDate = row[col['同意日']];
       return {
         name: row[col['利用者名']],
         staff: row[col['担当者名']],
         manager: row[col['サービス管理責任者']],
+        serviceType: row[col['サービスの種類']] || '就労継続支援B型',
+        creationDate: creationDate ? new Date(creationDate) : null,
+        consentDate: consentDate ? new Date(consentDate) : null,
+        planNeeds: row[col['本人の意向']] || '',
         longTermGoal: row[col['長期目標']],
         shortTermGoal1: row[col['短期目標①']],
         supportContent1: row[col['支援内容①']],
@@ -179,6 +188,7 @@ function loadUserMaster(userName) {
         shortTermGoal2: row[col['短期目標②']],
         supportContent2: row[col['支援内容②']],
         goal2Period: row[col['期間②']],
+        planNotes: row[col['計画特記事項']] || '',
         previousMonitoringDate: prevDate ? new Date(prevDate) : null,
         nextMonitoringMonth: row[col['次回モニタリング予定月']],
         previousIssues: row[col['前回の主な課題']] || '',

@@ -98,12 +98,17 @@ function callGeminiApi(prompt, options) {
     parts: parts
   }];
 
+  const generationConfig = {
+    temperature: options.temperature || 0.1,
+    maxOutputTokens: options.maxTokens || 8192
+  };
+  if (options.responseMimeType) {
+    generationConfig.responseMimeType = options.responseMimeType;
+  }
+
   const payload = {
     contents: contents,
-    generationConfig: {
-      temperature: options.temperature || 0.1,
-      maxOutputTokens: options.maxTokens || 8192
-    }
+    generationConfig: generationConfig
   };
 
   const fetchOptions = {
@@ -121,6 +126,13 @@ function callGeminiApi(prompt, options) {
   }
 
   const result = JSON.parse(response.getContentText());
+  if (result.usageMetadata) {
+    logInfo('GeminiAPI', 'token usage', {
+      prompt: result.usageMetadata.promptTokenCount,
+      candidates: result.usageMetadata.candidatesTokenCount,
+      total: result.usageMetadata.totalTokenCount
+    });
+  }
   return extractTextFromResponse_(result);
 }
 
@@ -135,22 +147,85 @@ function callGeminiWithRetry(prompt, options, maxRetries) {
       lastError = e;
       logWarn('GeminiAPI', `リトライ ${attempt + 1}/${maxRetries + 1}`, { error: e.message });
       if (attempt < maxRetries) {
-        Utilities.sleep(2000 * (attempt + 1));
+        Utilities.sleep(geminiRetryDelayMs_(e.message, attempt));
       }
     }
   }
   throw lastError;
 }
 
-function parseJsonResponse(text) {
-  let cleaned = text.trim();
+/**
+ * 429 時はレスポンスの "Please retry in Ns" を優先（短時間レート制限向け）。
+ * 無料枠の **1日あたりリクエスト上限** に達した場合は待っても解消しない（翌日まで／課金プランへ）。
+ */
+function geminiRetryDelayMs_(errorMessage, attemptZeroBased) {
+  const base = 2000 * (attemptZeroBased + 1);
+  const m = errorMessage && errorMessage.match(/Please retry in ([\d.]+)\s*s/i);
+  if (m) {
+    return Math.max(base, Math.ceil(parseFloat(m[1], 10) * 1000) + 500);
+  }
+  if (errorMessage && errorMessage.indexOf('429') !== -1) {
+    return Math.max(base, 25000);
+  }
+  return base;
+}
 
-  const jsonMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (jsonMatch) {
-    cleaned = jsonMatch[1].trim();
+/**
+ * Gemini が ```json ... ``` で囲む／閉じタグが欠ける／前後に説明文がある場合の前処理
+ */
+function stripJsonFromGeminiText_(text) {
+  let s = text.trim();
+  if (!s) return s;
+
+  // 先頭のフェンス（``` json のように空白が入る場合も）
+  s = s.replace(/^```\s*(?:json)?\s*\r?\n?/i, '');
+  s = s.replace(/\r?\n```\s*$/i, '');
+  s = s.trim();
+
+  // まだバッククォートで始まる場合（変種のフェンス）
+  if (s.charAt(0) === '`') {
+    s = s.replace(/^`{3}(?:json)?\s*\r?\n?/i, '');
+    s = s.replace(/\r?\n`{3}\s*$/i, '');
+    s = s.trim();
   }
 
+  // 非貪欲マッチで囲み全体を取れるとき
+  const m = s.match(/```\s*(?:json)?\s*([\s\S]*?)```/);
+  if (m) {
+    s = m[1].trim();
+  }
+
+  // トップレベルが { でないときは、最初の { から最後の } までを採用
+  if (s.length > 0 && s.charAt(0) !== '[' && s.charAt(0) !== '{') {
+    const i0 = s.indexOf('{');
+    const i1 = s.lastIndexOf('}');
+    if (i0 !== -1 && i1 > i0) {
+      s = s.substring(i0, i1 + 1);
+    }
+  }
+
+  return s.trim();
+}
+
+function parseJsonResponse(text) {
+  const cleaned = stripJsonFromGeminiText_(text);
   return JSON.parse(cleaned);
+}
+
+/**
+ * 処理状況シートの「面談日」が Date オブジェクトのとき、ファイル名に直結すると
+ * 「Wed Mar 25 2026 ...」になる。フォルダ名・保存ファイル名は yyyy-MM-dd に統一する。
+ */
+function normalizeSheetDateForFilename_(value) {
+  if (value === '' || value === null || value === undefined) return formatDate();
+  if (value instanceof Date) return formatDate(value);
+  if (typeof value === 'string') {
+    const t = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+    const d = new Date(t);
+    if (!isNaN(d.getTime())) return formatDate(d);
+  }
+  return formatDate();
 }
 
 function formatDate(date) {
@@ -158,9 +233,51 @@ function formatDate(date) {
   return Utilities.formatDate(date, 'Asia/Tokyo', 'yyyy-MM-dd');
 }
 
+function formatJapaneseDate(date) {
+  if (!date) return '';
+  if (typeof date === 'string') {
+    const parsed = new Date(date);
+    if (isNaN(parsed.getTime())) return date;
+    date = parsed;
+  }
+  return Utilities.formatDate(date, 'Asia/Tokyo', 'yyyy年M月d日');
+}
+
+/**
+ * 利用者マスター「次回モニタリング予定月」をテンプレート {{next_monitoring_month}} 用に整形する。
+ * シートが Date のとき raw の toString が入るのを防ぎ、yyyy年M月 に統一する。
+ */
+function formatNextMonitoringMonthForTemplate(value) {
+  if (value === '' || value === null || value === undefined) return '';
+  if (value instanceof Date) {
+    return Utilities.formatDate(value, 'Asia/Tokyo', 'yyyy年M月');
+  }
+  if (typeof value === 'string') {
+    const t = value.trim();
+    if (!t) return '';
+    const d = new Date(t);
+    if (!isNaN(d.getTime())) return Utilities.formatDate(d, 'Asia/Tokyo', 'yyyy年M月');
+    return t;
+  }
+  return String(value);
+}
+
 function formatDateTime(date) {
   date = date || new Date();
   return Utilities.formatDate(date, 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
+}
+
+/**
+ * Drive 上にフォルダが存在するか（削除済みのIDは false）
+ */
+function folderExists_(folderId) {
+  if (!folderId) return false;
+  try {
+    DriveApp.getFolderById(folderId);
+    return true;
+  } catch (e) {
+    return false;
+  }
 }
 
 function createSubfolder(parentFolderId, name) {
@@ -185,6 +302,10 @@ function extractTextFromResponse_(result) {
 
   if (candidate.finishReason === 'SAFETY') {
     throw new Error('Gemini API response blocked by safety filter (finishReason: SAFETY)');
+  }
+
+  if (candidate.finishReason === 'MAX_TOKENS') {
+    logWarn('GeminiAPI', 'finishReason=MAX_TOKENS（出力がトークン上限で切れた可能性）。続くJSONパースに失敗する場合はプロンプトで抽出を短くしてください。');
   }
 
   if (!candidate.content || !candidate.content.parts || candidate.content.parts.length === 0) {

@@ -1,11 +1,84 @@
+/** コピー取り込み済みの元ファイルID（移動できない所有者別アップロードの重複検知用） */
+var CLAIMED_ORIGINAL_FILE_IDS_KEY_ = 'CLAIMED_ORIGINAL_FILE_IDS_JSON';
+
+function getClaimedOriginalIdSet_() {
+  const raw = PropertiesService.getScriptProperties().getProperty(CLAIMED_ORIGINAL_FILE_IDS_KEY_);
+  if (!raw) return {};
+  try {
+    const ids = JSON.parse(raw);
+    if (!ids || !ids.length) return {};
+    const map = {};
+    for (let i = 0; i < ids.length; i++) map[ids[i]] = true;
+    return map;
+  } catch (e) {
+    return {};
+  }
+}
+
+function rememberClaimedOriginalId_(fileId) {
+  const props = PropertiesService.getScriptProperties();
+  let ids = [];
+  try {
+    const raw = props.getProperty(CLAIMED_ORIGINAL_FILE_IDS_KEY_);
+    ids = raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    ids = [];
+  }
+  if (!ids) ids = [];
+  ids.push(fileId);
+  const MAX = 500;
+  if (ids.length > MAX) ids = ids.slice(ids.length - MAX);
+  props.setProperty(CLAIMED_ORIGINAL_FILE_IDS_KEY_, JSON.stringify(ids));
+}
+
+function isDrivePermissionDenied_(err) {
+  const msg = String(err && err.message ? err.message : err);
+  return /アクセスが拒否|Access denied|Permission denied|Forbidden/i.test(msg);
+}
+
+/**
+ * 未処理→処理中へ取り込む。移動に失敗（他者所有ファイル等）した場合はコピーで取り込み、元IDを記録する。
+ * @returns {{ id: string, name: string, mimeType: string, createdDate: Date }}
+ */
+function claimAudioForProcessing_(audioFile) {
+  const folderIds = getFolderIds();
+  try {
+    moveFileToFolder(audioFile.id, folderIds.processing);
+    return {
+      id: audioFile.id,
+      name: audioFile.name,
+      mimeType: audioFile.mimeType,
+      createdDate: audioFile.createdDate
+    };
+  } catch (e) {
+    if (!isDrivePermissionDenied_(e)) throw e;
+    const orig = DriveApp.getFileById(audioFile.id);
+    const targetFolder = DriveApp.getFolderById(folderIds.processing);
+    const copy = orig.makeCopy(orig.getName(), targetFolder);
+    rememberClaimedOriginalId_(audioFile.id);
+    logWarn('FileManager', '元ファイルの移動ができないためコピーで取り込みました。01_未処理に残った元ファイルは不要なら削除してください。', {
+      originalId: audioFile.id,
+      copyId: copy.getId()
+    });
+    return {
+      id: copy.getId(),
+      name: audioFile.name,
+      mimeType: copy.getMimeType(),
+      createdDate: copy.getDateCreated()
+    };
+  }
+}
+
 function detectNewAudioFiles() {
   const folderIds = getFolderIds();
+  const skipOriginals = getClaimedOriginalIdSet_();
   const unprocessedFolder = DriveApp.getFolderById(folderIds.unprocessed);
   const files = unprocessedFolder.getFiles();
   const audioFiles = [];
 
   while (files.hasNext()) {
     const file = files.next();
+    if (skipOriginals[file.getId()]) continue;
     const mimeType = file.getMimeType();
     if (isAudioFile_(mimeType)) {
       audioFiles.push({
@@ -53,7 +126,7 @@ function moveFileToFolder(fileId, targetFolderId) {
 }
 
 function createUserProcessingFolder(parentFolderId, userName, date) {
-  const folderName = `${date}_${userName}`;
+  const folderName = `${normalizeSheetDateForFilename_(date)}_${userName}`;
   return createSubfolder(parentFolderId, folderName);
 }
 

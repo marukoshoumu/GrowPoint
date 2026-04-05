@@ -11,18 +11,20 @@ function runStage2(transcript, userMaster) {
     let lastOutput = null;
 
     for (let attempt = 0; attempt <= CONFIG.MAX_RETRIES; attempt++) {
+      let apiText = null;
       try {
         const currentPrompt = attempt === 0
           ? fullPrompt
           : getRetryPrompt(fullPrompt, lastError, lastOutput);
 
-        const response = callGeminiWithRetry(currentPrompt, {
+        apiText = callGeminiWithRetry(currentPrompt, {
           temperature: 0.1,
-          maxTokens: 16384
+          maxTokens: CONFIG.STAGE2_MAX_OUTPUT_TOKENS,
+          responseMimeType: 'application/json'
         }, 0);
 
-        lastOutput = response;
-        const parsed = parseJsonResponse(response);
+        lastOutput = apiText;
+        const parsed = parseJsonResponse(apiText);
         const validation = validateStage2Output(parsed);
 
         if (validation.valid) {
@@ -44,7 +46,9 @@ function runStage2(transcript, userMaster) {
 
       } catch (e) {
         lastError = e.message;
-        lastOutput = null;
+        if (apiText) {
+          lastOutput = apiText;
+        }
         logWarn('Stage2', `抽出エラー（試行 ${attempt + 1}）: ${e.message}`);
       }
 
@@ -146,7 +150,7 @@ function validateStage2Output(parsed) {
 
 
 function saveExtraction(folderId, userName, date, extractionJson) {
-  const fileName = `${date}_${userName}_抽出.json`;
+  const fileName = `${normalizeSheetDateForFilename_(date)}_${userName}_抽出.json`;
   const file = saveTextToFile(folderId, fileName, extractionJson);
   logInfo('Stage2', `構造化抽出ファイル保存: ${fileName}`);
   return file.getId();
