@@ -33,7 +33,7 @@ function rememberClaimedOriginalId_(fileId) {
 
 function isDrivePermissionDenied_(err) {
   const msg = String(err && err.message ? err.message : err);
-  return /アクセスが拒否|Access denied|Permission denied|Forbidden/i.test(msg);
+  return /アクセスが拒否|見つかりませんでした|Access denied|Permission denied|Forbidden|not found/i.test(msg);
 }
 
 /**
@@ -42,8 +42,9 @@ function isDrivePermissionDenied_(err) {
  */
 function claimAudioForProcessing_(audioFile) {
   const folderIds = getFolderIds();
+  const orig = audioFile.driveFile || DriveApp.getFileById(audioFile.id);
   try {
-    moveFileToFolder(audioFile.id, folderIds.processing);
+    moveFileToFolderWithObj_(orig, folderIds.processing);
     return {
       id: audioFile.id,
       name: audioFile.name,
@@ -52,14 +53,22 @@ function claimAudioForProcessing_(audioFile) {
     };
   } catch (e) {
     if (!isDrivePermissionDenied_(e)) throw e;
-    const orig = DriveApp.getFileById(audioFile.id);
+    const unprocessedFolder = DriveApp.getFolderById(folderIds.unprocessed);
     const targetFolder = DriveApp.getFolderById(folderIds.processing);
     const copy = orig.makeCopy(orig.getName(), targetFolder);
     rememberClaimedOriginalId_(audioFile.id);
-    logWarn('FileManager', '元ファイルの移動ができないためコピーで取り込みました。01_未処理に残った元ファイルは不要なら削除してください。', {
-      originalId: audioFile.id,
-      copyId: copy.getId()
-    });
+    try {
+      unprocessedFolder.removeFile(orig);
+      logInfo('FileManager', '他者所有ファイルをコピー取り込み後、01_未処理から除去しました。', {
+        originalId: audioFile.id,
+        copyId: copy.getId()
+      });
+    } catch (removeErr) {
+      logWarn('FileManager', '01_未処理からの除去に失敗。元ファイルが残っています。', {
+        originalId: audioFile.id,
+        error: removeErr.message
+      });
+    }
     return {
       id: copy.getId(),
       name: audioFile.name,
@@ -85,7 +94,8 @@ function detectNewAudioFiles() {
         id: file.getId(),
         name: file.getName(),
         mimeType: mimeType,
-        createdDate: file.getDateCreated()
+        createdDate: file.getDateCreated(),
+        driveFile: file
       });
     }
   }
@@ -113,6 +123,10 @@ function isAudioFile_(mimeType) {
 
 function moveFileToFolder(fileId, targetFolderId) {
   const file = DriveApp.getFileById(fileId);
+  return moveFileToFolderWithObj_(file, targetFolderId);
+}
+
+function moveFileToFolderWithObj_(file, targetFolderId) {
   const targetFolder = DriveApp.getFolderById(targetFolderId);
 
   const parents = file.getParents();
