@@ -34,16 +34,9 @@ const CONFIG = {
     APPROVED:       'APPROVED'
   },
 
-  /** Stage1 チャンク分割用モデル（時間範囲指示の理解力が必要） */
-  CHUNK_TRANSCRIPTION_MODEL: 'gemini-2.5-flash',
-
-  /** Stage1 チャンク分割: 長尺音声を時間ベースで分���して文字起こし */
-  CHUNK_DURATION_MIN: 10,
-  CHUNK_OVERLAP_MIN: 1,
-  CHUNK_SKIP_THRESHOLD_MIN: 15,
-  BYTES_PER_MINUTE_M4A: 1000000,
-  CHUNK_MAX_TOKENS: 8192,
-  MERGE_MAX_TOKENS: 32768,
+  /** Stage1: flash-liteは長尺音声で反復ループに陥るため、flashを使用 */
+  STAGE1_MODEL: 'gemini-2.5-flash',
+  STAGE1_MAX_OUTPUT_TOKENS: 65536,
 
   STAGE_TIME_LIMIT_MS: 4 * 60 * 1000,   // 4 min (2 min margin from 6 min limit)
   TIMEOUT_THRESHOLD_MS: 30 * 60 * 1000,   // 30 min timeout

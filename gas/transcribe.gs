@@ -5,29 +5,16 @@ function runStage1(audioFileId) {
     const glossary = loadGlossary();
     const audioFile = DriveApp.getFileById(audioFileId);
     const mimeType = audioFile.getMimeType() || 'audio/mp4';
-    const fileSize = audioFile.getSize();
     const fileUri = uploadToGeminiFileApi(audioFileId);
 
-    const durationMin = estimateDurationMin_(fileSize);
-    logInfo('Stage1', `推定音声長: ${durationMin}分 (${fileSize} bytes)`);
-
-    let transcript;
-
-    if (durationMin <= CONFIG.CHUNK_SKIP_THRESHOLD_MIN) {
-      const prompt = getStage1Prompt(glossary);
-      transcript = callGeminiWithRetry(prompt, {
-        fileUri: fileUri,
-        mimeType: mimeType,
-        temperature: 0.1,
-        maxTokens: 16384
-      });
-    } else {
-      const ranges = buildChunkRanges_(durationMin);
-      logInfo('Stage1', `チャンク分割: ${ranges.length}チャンク`, ranges);
-
-      const chunkTexts = transcribeChunks_(glossary, fileUri, mimeType, ranges);
-      transcript = mergeChunkTranscripts_(chunkTexts, ranges);
-    }
+    const prompt = getStage1Prompt(glossary);
+    const transcript = callGeminiWithRetry(prompt, {
+      model: CONFIG.STAGE1_MODEL,
+      fileUri: fileUri,
+      mimeType: mimeType,
+      temperature: 0.1,
+      maxTokens: CONFIG.STAGE1_MAX_OUTPUT_TOKENS
+    });
 
     logInfo('Stage1', `文字起こし完了: ${transcript.length}文字`);
     return {
