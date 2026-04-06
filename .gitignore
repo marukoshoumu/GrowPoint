@@ -10,3 +10,4 @@ build/
 .claude/
 docs/*
 docs/plans/*
+.venv-markitdown/*
