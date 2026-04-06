@@ -631,9 +631,10 @@ function buildStage3BPromptHardcoded_(userMaster, extractionJson) {
   const prevStr = userMaster.previousMonitoringDate
     ? formatJapaneseDate(userMaster.previousMonitoringDate) : '初回';
   const nextStr = formatNextMonitoringMonthForTemplate(userMaster.nextMonitoringMonth) || '';
+  const evidenceListing = buildEvidenceListing_(extractionJson);
   return 'あなたは就労継続支援B型事業所のモニタリングシート（就労関係）の下書きを作成するAIアシスタントです。\n\n'
     + '【タスク】\n'
-    + '構造化抽出JSONの monitoring_sheet_evidence セクションをもとに、\n'
+    + '以下の「各項目のエビデンス一覧」をもとに、\n'
     + '盛岡市様式のモニタリングシート（就労関係）の「特記事項」と「総合所見」を作成してください。\n\n'
     + '【重要な原則】\n'
     + '- 3段階評価（1=もう少し / 2=合格 / 3=すぐれている）はAIは付与しません\n'
@@ -657,52 +658,142 @@ function buildStage3BPromptHardcoded_(userMaster, extractionJson) {
     + `- サービス管理責任者: ${userMaster.manager}\n`
     + `- 前回モニタリング実施日: ${prevStr}\n`
     + `- 次回モニタリング予定月: ${nextStr}\n\n`
-    + '【構造化抽出JSON】\n'
-    + extractionJson + '\n\n'
+    + evidenceListing + '\n'
     + '【出力フォーマット】\n\n'
     + '以下のJSON形式で出力してください。テンプレートへの差し込みに使用します。\n'
-    + '各項目の evidence_key は monitoring_sheet_evidence 内の対応キーを示します。\n'
-    + '**そのキーの evidence が空文字列なら、note も必ず空文字列 "" にしてください。**\n'
-    + '**evidence が空でないキーのみ、その evidence / note の内容を元に特記事項を簡潔に記載してください。**\n'
-    + '**categories の情報は使わないでください。monitoring_sheet_evidence のみが特記事項のデータソースです。**\n\n'
+    + '上記「各項目のエビデンス一覧」に evidence がある項目のみ、その内容を元に1〜2文で簡潔な特記事項を記載してください。\n'
+    + '**evidence が「（なし）」の項目は、note を必ず空文字列 "" にしてください。**\n\n'
     + '```json\n'
     + '{\n'
     + '  "work_life": [\n'
-    + '    { "item": "遅刻，早退，欠勤しない", "evidence_key": "attendance", "note": "" },\n'
-    + '    { "item": "作業開始（終了）時間を守る", "evidence_key": "punctuality", "note": "" },\n'
-    + '    { "item": "健康に気を付けた生活をしている", "evidence_key": "health_management", "note": "" },\n'
-    + '    { "item": "職場に適した身だしなみ", "evidence_key": "appearance", "note": "" },\n'
-    + '    { "item": "職場の規則を守る", "evidence_key": "rule_compliance", "note": "" },\n'
-    + '    { "item": "相談・報告・連絡ができる", "evidence_key": "reporting", "note": "" },\n'
-    + '    { "item": "職場を散らかさない", "evidence_key": "workspace_tidiness", "note": "" },\n'
-    + '    { "item": "作業に積極的に取り組む", "evidence_key": "work_attitude", "note": "" },\n'
-    + '    { "item": "作業に集中して取り組む", "evidence_key": "concentration", "note": "" },\n'
-    + '    { "item": "作業に最後まで取り組む", "evidence_key": "persistence", "note": "" }\n'
+    + '    { "item": "遅刻，早退，欠勤しない", "note": "" },\n'
+    + '    { "item": "作業開始（終了）時間を守る", "note": "" },\n'
+    + '    { "item": "健康に気を付けた生活をしている", "note": "" },\n'
+    + '    { "item": "職場に適した身だしなみ", "note": "" },\n'
+    + '    { "item": "職場の規則を守る", "note": "" },\n'
+    + '    { "item": "相談・報告・連絡ができる", "note": "" },\n'
+    + '    { "item": "職場を散らかさない", "note": "" },\n'
+    + '    { "item": "作業に積極的に取り組む", "note": "" },\n'
+    + '    { "item": "作業に集中して取り組む", "note": "" },\n'
+    + '    { "item": "作業に最後まで取り組む", "note": "" }\n'
     + '  ],\n'
     + '  "relationships": [\n'
-    + '    { "item": "挨拶ができる", "evidence_key": "greeting", "note": "" },\n'
-    + '    { "item": "同僚と会話ができる", "evidence_key": "conversation", "note": "" },\n'
-    + '    { "item": "上司を理解している", "evidence_key": "understanding_hierarchy", "note": "" },\n'
-    + '    { "item": "感情的になる", "evidence_key": "emotional_control", "note": "" },\n'
-    + '    { "item": "ストレスをためている", "evidence_key": "stress_management", "note": "" }\n'
+    + '    { "item": "挨拶ができる", "note": "" },\n'
+    + '    { "item": "同僚と会話ができる", "note": "" },\n'
+    + '    { "item": "上司を理解している", "note": "" },\n'
+    + '    { "item": "感情的になる", "note": "" },\n'
+    + '    { "item": "ストレスをためている", "note": "" }\n'
     + '  ],\n'
     + '  "tasks": [\n'
-    + '    { "item": "作業時間内の体力がある", "evidence_key": "physical_stamina", "note": "" },\n'
-    + '    { "item": "指示を理解し守れる", "evidence_key": "instruction_compliance", "note": "" },\n'
-    + '    { "item": "適正な作業の完成度", "evidence_key": "quality", "note": "" },\n'
-    + '    { "item": "適正な作業スピード", "evidence_key": "speed", "note": "" },\n'
-    + '    { "item": "道具を安全に使える", "evidence_key": "safety_awareness", "note": "" }\n'
+    + '    { "item": "作業時間内の体力がある", "note": "" },\n'
+    + '    { "item": "指示を理解し守れる", "note": "" },\n'
+    + '    { "item": "適正な作業の完成度", "note": "" },\n'
+    + '    { "item": "適正な作業スピード", "note": "" },\n'
+    + '    { "item": "道具を安全に使える", "note": "" }\n'
     + '  ],\n'
     + '  "overall_assessment": "（総合所見テキスト）"\n'
     + '}\n'
     + '```\n\n'
+    + '【総合所見用データ】\n'
+    + buildOverallAssessmentData_(extractionJson) + '\n\n'
     + '【総合所見の書き方】\n'
-    + 'データソース: cat6_staff (sub_type: "assessment" | "observation") + cross_reference_alerts\n\n'
-    + '支援者の総合的な見解を、抽出データをもとに記載。\n'
+    + '上記「総合所見用データ」の cat6_staff と cross_reference_alerts をもとに記載。\n\n'
+    + '支援者の総合的な見解を記載。\n'
     + '前回モニタリングからの変化があれば明記。\n'
     + '短期目標に対する進捗の概況を含める。\n\n'
     + '文書末尾に以下の注記を必ず付与：\n'
     + '「本シートの特記事項はAI支援による下書きです。評価（1/2/3）は担当者が判断・記入してください。」';
+}
+
+
+function buildEvidenceListing_(extractionJson) {
+  let data;
+  try {
+    data = JSON.parse(extractionJson);
+  } catch (e) {
+    return '【各項目のエビデンス一覧】\n（パースエラーのため生成不可）\n';
+  }
+  const mse = data.monitoring_sheet_evidence;
+  if (!mse) return '【各項目のエビデンス一覧】\n（データなし）\n';
+
+  const workLifeMap = [
+    ['attendance', '遅刻，早退，欠勤しない'],
+    ['punctuality', '作業開始（終了）時間を守る'],
+    ['health_management', '健康に気を付けた生活をしている'],
+    ['appearance', '職場に適した身だしなみ'],
+    ['rule_compliance', '職場の規則を守る'],
+    ['reporting', '相談・報告・連絡ができる'],
+    ['workspace_tidiness', '職場を散らかさない'],
+    ['work_attitude', '作業に積極的に取り組む'],
+    ['concentration', '作業に集中して取り組む'],
+    ['persistence', '作業に最後まで取り組む']
+  ];
+  const relMap = [
+    ['greeting', '挨拶ができる'],
+    ['conversation', '同僚と会話ができる'],
+    ['understanding_hierarchy', '上司を理解している'],
+    ['emotional_control', '感情的になる'],
+    ['stress_management', 'ストレスをためている']
+  ];
+  const taskMap = [
+    ['physical_stamina', '作業時間内の体力がある'],
+    ['instruction_compliance', '指示を理解し守れる'],
+    ['quality', '適正な作業の完成度'],
+    ['speed', '適正な作業スピード'],
+    ['safety_awareness', '道具を安全に使える']
+  ];
+
+  function formatSection(sectionName, sectionData, mapping) {
+    const lines = [sectionName + ':'];
+    for (let i = 0; i < mapping.length; i++) {
+      const key = mapping[i][0];
+      const label = mapping[i][1];
+      const entry = sectionData && sectionData[key] ? sectionData[key] : {};
+      const ev = entry.evidence || '';
+      const note = entry.note || '';
+      if (ev) {
+        lines.push('  ● ' + label + '（' + key + '）');
+        lines.push('    evidence: ' + ev);
+        if (note) lines.push('    note: ' + note);
+      } else {
+        lines.push('  ○ ' + label + '（' + key + '）→ evidence なし → note は空文字列 ""');
+      }
+    }
+    return lines.join('\n');
+  }
+
+  return '【各項目のエビデンス一覧（特記事項はこの内容のみを使用してください）】\n\n'
+    + '● = evidence あり → この内容を元に1〜2文で特記事項を記載\n'
+    + '○ = evidence なし → note は必ず空文字列 "" にする\n\n'
+    + formatSection('1. 職業生活', mse.work_life, workLifeMap) + '\n\n'
+    + formatSection('2. 対人関係', mse.relationships, relMap) + '\n\n'
+    + formatSection('3. 作業', mse.tasks, taskMap) + '\n';
+}
+
+
+function buildOverallAssessmentData_(extractionJson) {
+  let data;
+  try {
+    data = JSON.parse(extractionJson);
+  } catch (e) {
+    return '（パースエラー）';
+  }
+  const cat6 = data.categories && data.categories.cat6_staff ? data.categories.cat6_staff : [];
+  const alerts = data.cross_reference_alerts || [];
+  const parts = [];
+  if (cat6.length > 0) {
+    parts.push('cat6_staff:');
+    for (let i = 0; i < cat6.length; i++) {
+      parts.push('  - ' + cat6[i].summary + (cat6[i].time_context === 'past_facility' ? '（過去：' + (cat6[i].facility_name || '不明') + '）' : ''));
+    }
+  }
+  if (alerts.length > 0) {
+    parts.push('cross_reference_alerts:');
+    for (let j = 0; j < alerts.length; j++) {
+      parts.push('  - [' + alerts[j].alert_type + '] ' + alerts[j].description);
+    }
+  }
+  return parts.join('\n');
 }
 
 
