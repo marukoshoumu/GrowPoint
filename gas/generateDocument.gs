@@ -105,14 +105,21 @@ function stripNoMentionPlaceholderLines_(text) {
 }
 
 
-// --- Stage 3-B: モニタリングシート JSON 生成 ---
+// --- Stage 3-B: モニタリングシート生成 ---
+// per-item notes は Stage2 の monitoring_sheet_evidence から GAS で直接組立。
+// LLM は overall_assessment（総合所見）のみ生成する。
 
 function runStage3B(extractionData, userMaster) {
   logInfo('Stage3B', 'モニタリングシート生成開始');
 
   try {
+    // 1. per-item notes を evidence から直接構築（LLM不使用）
+    const sheetData = buildSheetNotesFromEvidence_(extractionData);
+    logInfo('Stage3B', 'エビデンスから特記事項を構築完了');
+
+    // 2. overall_assessment のみ LLM で生成
     const extractionJson = JSON.stringify(extractionData, null, 2);
-    const prompt = getStage3BPrompt(userMaster, extractionJson);
+    const prompt = getStage3BOverallAssessmentPrompt(userMaster, extractionJson);
 
     let lastError = null;
     let lastOutput = null;
@@ -125,32 +132,31 @@ function runStage3B(extractionData, userMaster) {
 
         const response = callGeminiWithRetry(currentPrompt, {
           temperature: 0.2,
-          maxTokens: 8192,
-          responseMimeType: 'application/json'
+          maxTokens: 2048
         }, 0);
 
         lastOutput = response;
-        const parsed = parseJsonResponse(response);
-        const validation = validateStage3BOutput(parsed);
+        const assessment = response.trim();
 
-        if (validation.valid) {
-          logInfo('Stage3B', `シートデータ生成完了（試行 ${attempt + 1}回目）`);
+        if (assessment.length > 10) {
+          sheetData.overall_assessment = assessment;
+          logInfo('Stage3B', `総合所見生成完了（試行 ${attempt + 1}回目）`);
           return {
             success: true,
             data: {
-              parsed: parsed,
+              parsed: sheetData,
               attempts: attempt + 1
             }
           };
         }
 
-        lastError = validation.error;
-        logWarn('Stage3B', `バリデーション失敗（試行 ${attempt + 1}）: ${validation.error}`);
+        lastError = '総合所見が短すぎます';
+        logWarn('Stage3B', `総合所見が短すぎ（試行 ${attempt + 1}）: ${assessment.length}文字`);
 
       } catch (e) {
         lastError = e.message;
         lastOutput = null;
-        logWarn('Stage3B', `シート生成エラー（試行 ${attempt + 1}）: ${e.message}`);
+        logWarn('Stage3B', `総合所見生成エラー（試行 ${attempt + 1}）: ${e.message}`);
       }
 
       if (attempt < CONFIG.MAX_RETRIES) {
@@ -158,10 +164,15 @@ function runStage3B(extractionData, userMaster) {
       }
     }
 
-    logError('Stage3B', 'モニタリングシート生成失敗（リトライ上限）', { lastError: lastError });
+    // overall_assessment の生成に失敗しても、per-item notes は返す
+    logWarn('Stage3B', '総合所見生成失敗（リトライ上限）。特記事項のみで続行', { lastError: lastError });
+    sheetData.overall_assessment = '（総合所見の自動生成に失敗しました。担当者が記入してください。）';
     return {
-      success: false,
-      error: lastError || 'モニタリングシート生成に失敗しました'
+      success: true,
+      data: {
+        parsed: sheetData,
+        attempts: CONFIG.MAX_RETRIES + 1
+      }
     };
   } catch (e) {
     logError('Stage3B', `モニタリングシート生成で予期しないエラー: ${e.message}`);
@@ -173,32 +184,61 @@ function runStage3B(extractionData, userMaster) {
 }
 
 
-function validateStage3BOutput(parsed) {
-  if (typeof parsed !== 'object' || parsed === null) {
-    return { valid: false, error: 'トップレベルがオブジェクトではありません' };
-  }
+/**
+ * Stage2 の monitoring_sheet_evidence から、テンプレート差し込み用の sheetData を直接構築。
+ * LLM を経由しないため、項目間のコピペが原理的に発生しない。
+ */
+function buildSheetNotesFromEvidence_(extractionData) {
+  const mse = extractionData.monitoring_sheet_evidence || {};
 
-  if (!Array.isArray(parsed.work_life) || parsed.work_life.length < 10) {
-    return { valid: false, error: 'work_life が不足（10項目必要）' };
-  }
-  if (!Array.isArray(parsed.relationships) || parsed.relationships.length < 5) {
-    return { valid: false, error: 'relationships が不足（5項目必要）' };
-  }
-  if (!Array.isArray(parsed.tasks) || parsed.tasks.length < 5) {
-    return { valid: false, error: 'tasks が不足（5項目必要）' };
-  }
-  if (!parsed.overall_assessment || typeof parsed.overall_assessment !== 'string') {
-    return { valid: false, error: 'overall_assessment が文字列ではありません' };
-  }
+  const workLifeMap = [
+    ['attendance', '遅刻，早退，欠勤しない'],
+    ['punctuality', '作業開始（終了）時間を守る'],
+    ['health_management', '健康に気を付けた生活をしている'],
+    ['appearance', '職場に適した身だしなみ'],
+    ['rule_compliance', '職場の規則を守る'],
+    ['reporting', '相談・報告・連絡ができる'],
+    ['workspace_tidiness', '職場を散らかさない'],
+    ['work_attitude', '作業に積極的に取り組む'],
+    ['concentration', '作業に集中して取り組む'],
+    ['persistence', '作業に最後まで取り組む']
+  ];
+  const relMap = [
+    ['greeting', '挨拶ができる'],
+    ['conversation', '同僚と会話ができる'],
+    ['understanding_hierarchy', '上司を理解している'],
+    ['emotional_control', '感情的になる'],
+    ['stress_management', 'ストレスをためている']
+  ];
+  const taskMap = [
+    ['physical_stamina', '作業時間内の体力がある'],
+    ['instruction_compliance', '指示を理解し守れる'],
+    ['quality', '適正な作業の完成度'],
+    ['speed', '適正な作業スピード'],
+    ['safety_awareness', '道具を安全に使える']
+  ];
 
-  const allItems = parsed.work_life.concat(parsed.relationships).concat(parsed.tasks);
-  for (let i = 0; i < allItems.length; i++) {
-    if (!allItems[i].item || typeof allItems[i].note === 'undefined') {
-      return { valid: false, error: `項目[${i}]に item または note がありません` };
+  function buildItems(sectionData, mapping) {
+    const items = [];
+    for (let i = 0; i < mapping.length; i++) {
+      const key = mapping[i][0];
+      const label = mapping[i][1];
+      const entry = sectionData && sectionData[key] ? sectionData[key] : {};
+      const evidence = (entry.evidence || '').trim();
+      items.push({
+        item: label,
+        note: evidence
+      });
     }
+    return items;
   }
 
-  return { valid: true };
+  return {
+    work_life: buildItems(mse.work_life, workLifeMap),
+    relationships: buildItems(mse.relationships, relMap),
+    tasks: buildItems(mse.tasks, taskMap),
+    overall_assessment: ''
+  };
 }
 
 

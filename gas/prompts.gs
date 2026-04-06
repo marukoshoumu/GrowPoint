@@ -602,10 +602,16 @@ function buildStage3APromptHardcoded_(userMaster, extractionJson) {
 }
 
 
-function getStage3BPrompt(userMaster, extractionJson) {
+/**
+ * Stage3-B: overall_assessment（総合所見）のみをLLMで生成するプロンプト。
+ * per-item notes は GAS 側で monitoring_sheet_evidence から直接構築するため、
+ * LLM の仕事は総合所見テキストの生成のみ。
+ */
+function getStage3BOverallAssessmentPrompt(userMaster, extractionJson) {
   const fileIds = getPromptFileIds();
   if (fileIds.stage3b) {
     try {
+      // Driveファイルが設定されている場合はそちらを使う（将来用）
       return getPromptFromFile_(fileIds.stage3b, {
         userName: userMaster.name,
         date: formatJapaneseDate(userMaster.date) || '',
@@ -622,35 +628,20 @@ function getStage3BPrompt(userMaster, extractionJson) {
       logWarn('prompts', `Stage3Bプロンプトファイル読み込み失敗、ハードコード版を使用: ${e.message}`);
     }
   }
-  return buildStage3BPromptHardcoded_(userMaster, extractionJson);
+  return buildStage3BOverallAssessmentPromptHardcoded_(userMaster, extractionJson);
 }
 
 
-function buildStage3BPromptHardcoded_(userMaster, extractionJson) {
+function buildStage3BOverallAssessmentPromptHardcoded_(userMaster, extractionJson) {
   const dateStr = formatJapaneseDate(userMaster.date) || '';
   const prevStr = userMaster.previousMonitoringDate
     ? formatJapaneseDate(userMaster.previousMonitoringDate) : '初回';
   const nextStr = formatNextMonitoringMonthForTemplate(userMaster.nextMonitoringMonth) || '';
-  const evidenceListing = buildEvidenceListing_(extractionJson);
-  return 'あなたは就労継続支援B型事業所のモニタリングシート（就労関係）の下書きを作成するAIアシスタントです。\n\n'
+
+  return 'あなたは就労継続支援B型事業所のモニタリングシート（就労関係）の「総合所見」を作成するAIアシスタントです。\n\n'
     + '【タスク】\n'
-    + '以下の「各項目のエビデンス一覧」をもとに、\n'
-    + '盛岡市様式のモニタリングシート（就労関係）の「特記事項」と「総合所見」を作成してください。\n\n'
-    + '【重要な原則】\n'
-    + '- 3段階評価（1=もう少し / 2=合格 / 3=すぐれている）はAIは付与しません\n'
-    + '- 各項目の「特記事項」欄には、monitoring_sheet_evidence の該当項目キーの evidence / note を第一根拠として、その項目に該当するエビデンスのみを簡潔に記載してください\n'
-    + '- 複数項目に同じ文章をコピペしないでください。各項目は独立した内容にしてください\n'
-    + '- evidence が空文字列の項目は note も空文字列 "" にしてください\n'
-    + '- 根拠となる事実・発言は残しつつ、担当者が評価を付けられる程度の長さにまとめる\n'
-    + '- 面談中に言及がなかった項目の note は空文字列 "" にしてください。「面談中の言及なし」という文字列は入れないでください\n\n'
-    + '- 【過去の事業所の情報の扱い】抽出JSONの time_context フィールドを確認し、以下のルールで記載してください：\n'
-    + '  - time_context="current" → そのまま記載\n'
-    + '  - time_context="past_facility" → 「（過去：○○事業所）」と明記。facility_name が "不明" の場合は「（過去：以前の事業所）」\n'
-    + '  - time_context="general" → そのまま記載\n\n'
-    + '【整合性ルール】\n'
-    + '本シートは、同日に生成されるモニタリング記録票と同じ面談データに基づいています。\n'
-    + '記録票の「4.1」「4.2」（支援の実施状況）に記載した事実と矛盾する特記事項を書かないでください。\n'
-    + '同じ発言を参照する場合は、表現の整合性を保ってください。\n\n'
+    + '以下のデータをもとに、モニタリングシートの「総合所見」テキストのみを出力してください。\n'
+    + 'JSON形式ではなく、プレーンテキストで出力してください。\n\n'
     + '【利用者マスター情報】\n'
     + `- 利用者名: ${userMaster.name}\n`
     + `- 実施年月日: ${dateStr}\n`
@@ -658,116 +649,21 @@ function buildStage3BPromptHardcoded_(userMaster, extractionJson) {
     + `- サービス管理責任者: ${userMaster.manager}\n`
     + `- 前回モニタリング実施日: ${prevStr}\n`
     + `- 次回モニタリング予定月: ${nextStr}\n\n`
-    + evidenceListing + '\n'
-    + '【出力フォーマット】\n\n'
-    + '以下のJSON形式で出力してください。テンプレートへの差し込みに使用します。\n'
-    + '上記「各項目のエビデンス一覧」に evidence がある項目のみ、その内容を元に1〜2文で簡潔な特記事項を記載してください。\n'
-    + '**evidence が「（なし）」の項目は、note を必ず空文字列 "" にしてください。**\n\n'
-    + '```json\n'
-    + '{\n'
-    + '  "work_life": [\n'
-    + '    { "item": "遅刻，早退，欠勤しない", "note": "" },\n'
-    + '    { "item": "作業開始（終了）時間を守る", "note": "" },\n'
-    + '    { "item": "健康に気を付けた生活をしている", "note": "" },\n'
-    + '    { "item": "職場に適した身だしなみ", "note": "" },\n'
-    + '    { "item": "職場の規則を守る", "note": "" },\n'
-    + '    { "item": "相談・報告・連絡ができる", "note": "" },\n'
-    + '    { "item": "職場を散らかさない", "note": "" },\n'
-    + '    { "item": "作業に積極的に取り組む", "note": "" },\n'
-    + '    { "item": "作業に集中して取り組む", "note": "" },\n'
-    + '    { "item": "作業に最後まで取り組む", "note": "" }\n'
-    + '  ],\n'
-    + '  "relationships": [\n'
-    + '    { "item": "挨拶ができる", "note": "" },\n'
-    + '    { "item": "同僚と会話ができる", "note": "" },\n'
-    + '    { "item": "上司を理解している", "note": "" },\n'
-    + '    { "item": "感情的になる", "note": "" },\n'
-    + '    { "item": "ストレスをためている", "note": "" }\n'
-    + '  ],\n'
-    + '  "tasks": [\n'
-    + '    { "item": "作業時間内の体力がある", "note": "" },\n'
-    + '    { "item": "指示を理解し守れる", "note": "" },\n'
-    + '    { "item": "適正な作業の完成度", "note": "" },\n'
-    + '    { "item": "適正な作業スピード", "note": "" },\n'
-    + '    { "item": "道具を安全に使える", "note": "" }\n'
-    + '  ],\n'
-    + '  "overall_assessment": "（総合所見テキスト）"\n'
-    + '}\n'
-    + '```\n\n'
     + '【総合所見用データ】\n'
     + buildOverallAssessmentData_(extractionJson) + '\n\n'
+    + '【過去の事業所の情報の扱い】\n'
+    + '- time_context="current" → そのまま記載\n'
+    + '- time_context="past_facility" → 「（過去：○○事業所での経験）」と明記。facility_name が "不明" の場合は「（過去：以前の事業所での経験）」\n'
+    + '- time_context="general" → そのまま記載\n\n'
     + '【総合所見の書き方】\n'
-    + '上記「総合所見用データ」の cat6_staff と cross_reference_alerts をもとに記載。\n\n'
-    + '支援者の総合的な見解を記載。\n'
-    + '前回モニタリングからの変化があれば明記。\n'
-    + '短期目標に対する進捗の概況を含める。\n\n'
-    + '文書末尾に以下の注記を必ず付与：\n'
+    + '- 支援者（cat6_staff）の観察・助言・懸念を中心に、総合的な見解を記載\n'
+    + '- cross_reference_alerts があれば反映\n'
+    + '- 前回モニタリングからの変化があれば明記\n'
+    + '- 短期目標に対する進捗の概況を含める\n'
+    + '- 「である」調で記載\n'
+    + '- 3〜5文程度でコンパクトにまとめる\n\n'
+    + '末尾に以下の注記を必ず付与：\n'
     + '「本シートの特記事項はAI支援による下書きです。評価（1/2/3）は担当者が判断・記入してください。」';
-}
-
-
-function buildEvidenceListing_(extractionJson) {
-  let data;
-  try {
-    data = JSON.parse(extractionJson);
-  } catch (e) {
-    return '【各項目のエビデンス一覧】\n（パースエラーのため生成不可）\n';
-  }
-  const mse = data.monitoring_sheet_evidence;
-  if (!mse) return '【各項目のエビデンス一覧】\n（データなし）\n';
-
-  const workLifeMap = [
-    ['attendance', '遅刻，早退，欠勤しない'],
-    ['punctuality', '作業開始（終了）時間を守る'],
-    ['health_management', '健康に気を付けた生活をしている'],
-    ['appearance', '職場に適した身だしなみ'],
-    ['rule_compliance', '職場の規則を守る'],
-    ['reporting', '相談・報告・連絡ができる'],
-    ['workspace_tidiness', '職場を散らかさない'],
-    ['work_attitude', '作業に積極的に取り組む'],
-    ['concentration', '作業に集中して取り組む'],
-    ['persistence', '作業に最後まで取り組む']
-  ];
-  const relMap = [
-    ['greeting', '挨拶ができる'],
-    ['conversation', '同僚と会話ができる'],
-    ['understanding_hierarchy', '上司を理解している'],
-    ['emotional_control', '感情的になる'],
-    ['stress_management', 'ストレスをためている']
-  ];
-  const taskMap = [
-    ['physical_stamina', '作業時間内の体力がある'],
-    ['instruction_compliance', '指示を理解し守れる'],
-    ['quality', '適正な作業の完成度'],
-    ['speed', '適正な作業スピード'],
-    ['safety_awareness', '道具を安全に使える']
-  ];
-
-  function formatSection(sectionName, sectionData, mapping) {
-    const lines = [sectionName + ':'];
-    for (let i = 0; i < mapping.length; i++) {
-      const key = mapping[i][0];
-      const label = mapping[i][1];
-      const entry = sectionData && sectionData[key] ? sectionData[key] : {};
-      const ev = entry.evidence || '';
-      const note = entry.note || '';
-      if (ev) {
-        lines.push('  ● ' + label + '（' + key + '）');
-        lines.push('    evidence: ' + ev);
-        if (note) lines.push('    note: ' + note);
-      } else {
-        lines.push('  ○ ' + label + '（' + key + '）→ evidence なし → note は空文字列 ""');
-      }
-    }
-    return lines.join('\n');
-  }
-
-  return '【各項目のエビデンス一覧（特記事項はこの内容のみを使用してください）】\n\n'
-    + '● = evidence あり → この内容を元に1〜2文で特記事項を記載\n'
-    + '○ = evidence なし → note は必ず空文字列 "" にする\n\n'
-    + formatSection('1. 職業生活', mse.work_life, workLifeMap) + '\n\n'
-    + formatSection('2. 対人関係', mse.relationships, relMap) + '\n\n'
-    + formatSection('3. 作業', mse.tasks, taskMap) + '\n';
 }
 
 
