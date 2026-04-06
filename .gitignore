@@ -11,3 +11,4 @@ build/
 docs/*
 docs/plans/*
 .venv-markitdown/*
+.clasp.json
