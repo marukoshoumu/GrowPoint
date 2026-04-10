@@ -165,6 +165,42 @@ function createUserProcessingFolder(parentFolderId, userName, date) {
   return createSubfolder(parentFolderId, folderName);
 }
 
+/**
+ * ファイル名の「_より後」から面談日を推定する。
+ * - YYYY-MM-DD / YYYY_MM_DD 形式を含む
+ * - 末尾8桁 YYYYMMDD
+ * - 末尾6桁 YYMMDD（2000年代として解釈）
+ */
+function parseDateFromFileSuffix_(suffix) {
+  if (!suffix) return null;
+
+  const iso = suffix.match(/(\d{4})[-_](\d{2})[-_](\d{2})/);
+  if (iso) {
+    return iso[1] + '-' + iso[2] + '-' + iso[3];
+  }
+
+  const end8 = suffix.match(/(\d{4})(\d{2})(\d{2})$/);
+  if (end8) {
+    const y = parseInt(end8[1], 10);
+    if (y >= 1900 && y <= 2100) {
+      return end8[1] + '-' + end8[2] + '-' + end8[3];
+    }
+  }
+
+  const end6 = suffix.match(/(\d{2})(\d{2})(\d{2})$/);
+  if (end6) {
+    const mm = parseInt(end6[2], 10);
+    const dd = parseInt(end6[3], 10);
+    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+      const yy = parseInt(end6[1], 10);
+      const fullY = 2000 + yy;
+      return fullY + '-' + end6[2] + '-' + end6[3];
+    }
+  }
+
+  return null;
+}
+
 function parseFileNameForUser(fileName) {
   const nameWithoutExt = fileName.replace(/\.[^.]+$/, '');
 
@@ -181,6 +217,17 @@ function parseFileNameForUser(fileName) {
     return {
       userName: reverseMatch[2],
       date: reverseMatch[1].replace(/_/g, '-')
+    };
+  }
+
+  const usIdx = nameWithoutExt.indexOf('_');
+  if (usIdx > 0) {
+    const userName = nameWithoutExt.substring(0, usIdx);
+    const suffix = nameWithoutExt.substring(usIdx + 1);
+    const dateFromSuffix = parseDateFromFileSuffix_(suffix);
+    return {
+      userName: userName,
+      date: dateFromSuffix || formatDate()
     };
   }
 
