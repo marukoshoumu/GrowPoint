@@ -48,6 +48,38 @@ function isDrivePermissionDenied_(err) {
 }
 
 /**
+ * フォルダからファイルの紐付けを外す。共有ドライブでは DriveApp.removeFile が使えないため Drive API v3 を併用。
+ * 共有ドライブのファイルは常に親が1つ必須のため removeParents のみは不可 → 未処理から外す目的ではゴミ箱へ移す。
+ * @returns {boolean} 成功したら true
+ */
+function removeFileFromFolderRobust_(fileId, folderId) {
+  const file = DriveApp.getFileById(fileId);
+  const folder = DriveApp.getFolderById(folderId);
+  try {
+    folder.removeFile(file);
+    return true;
+  } catch (e) {
+    try {
+      // Drive API v3: update(resource, fileId, mediaData, optionalArgs)。メタデータのみは第3引数 null。
+      // removeParents だけだと「A shared drive item must have exactly one parent」になるため、
+      // 共有ドライブでは trashed:true で未処理フォルダから実質除去する。
+      Drive.Files.update({ trashed: true }, fileId, null, {
+        supportsAllDrives: true
+      });
+      logInfo('FileManager', 'Drive API でゴミ箱へ移動し未処理から除去（共有ドライブ）', { fileId: fileId });
+      return true;
+    } catch (e2) {
+      logWarn('FileManager', '未処理フォルダからの除去に失敗', {
+        fileId: fileId,
+        driveAppErr: e.message,
+        apiErr: e2.message
+      });
+      return false;
+    }
+  }
+}
+
+/**
  * 未処理→処理中へ取り込む。移動に失敗（他者所有ファイル等）した場合はコピーで取り込み、元IDを記録する。
  * @returns {{ id: string, name: string, mimeType: string, createdDate: Date }}
  */
@@ -62,7 +94,7 @@ function claimAudioForProcessing_(audioFile) {
   const isOwnFile = owner && owner.getEmail() === currentUser;
 
   if (isOwnFile) {
-    moveFileToFolderWithObj_(orig, folderIds.processing);
+    moveFileToFolder(orig.getId(), folderIds.processing);
     return {
       id: audioFile.id,
       name: audioFile.name,
@@ -81,13 +113,9 @@ function claimAudioForProcessing_(audioFile) {
     owner: owner ? owner.getEmail() : '不明'
   });
 
-  try {
-    const unprocessedFolder = DriveApp.getFolderById(folderIds.unprocessed);
-    unprocessedFolder.removeFile(orig);
-  } catch (removeErr) {
-    logWarn('FileManager', '01_未処理からの除去に失敗。元ファイルが残っています。', {
-      originalId: audioFile.id,
-      error: removeErr.message
+  if (!removeFileFromFolderRobust_(audioFile.id, folderIds.unprocessed)) {
+    logWarn('FileManager', '01_未処理からの除去に失敗。元ファイルが残る可能性があります。', {
+      originalId: audioFile.id
     });
   }
 
@@ -144,7 +172,12 @@ function isAudioFile_(mimeType) {
 
 function moveFileToFolder(fileId, targetFolderId) {
   const file = DriveApp.getFileById(fileId);
-  return moveFileToFolderWithObj_(file, targetFolderId);
+  try {
+    return moveFileToFolderWithObj_(file, targetFolderId);
+  } catch (e) {
+    moveFileToFolderByDriveApi_(fileId, targetFolderId);
+    return DriveApp.getFileById(fileId);
+  }
 }
 
 function moveFileToFolderWithObj_(file, targetFolderId) {
@@ -158,6 +191,29 @@ function moveFileToFolderWithObj_(file, targetFolderId) {
 
   logInfo('FileManager', `ファイル移動: ${file.getName()} → ${targetFolder.getName()}`);
   return file;
+}
+
+/**
+ * 共有ドライブでは DriveApp の removeFile/addFile が使えないため、
+ * addParents + removeParents を同一リクエストで行う（親は1つのみ想定）。
+ */
+function moveFileToFolderByDriveApi_(fileId, targetFolderId) {
+  const meta = Drive.Files.get(fileId, { fields: 'parents', supportsAllDrives: true });
+  const parentIds = meta.parents || [];
+  if (!parentIds.length) {
+    throw new Error('Drive API 移動: 親フォルダがありません');
+  }
+  Drive.Files.update({}, fileId, null, {
+    addParents: targetFolderId,
+    removeParents: parentIds.join(','),
+    supportsAllDrives: true
+  });
+  const f = DriveApp.getFileById(fileId);
+  logInfo('FileManager', 'Drive API でファイル移動（共有ドライブ）', {
+    fileId: fileId,
+    name: f.getName(),
+    toFolderId: targetFolderId
+  });
 }
 
 function createUserProcessingFolder(parentFolderId, userName, date) {
@@ -201,39 +257,71 @@ function parseDateFromFileSuffix_(suffix) {
   return null;
 }
 
+/**
+ * 末尾が _NN-MM（例: _01-03 = 3分割の1番目）なら取り除いたベース名とチャンク情報を返す。
+ * 判定は拡張子除去後の文字列の末尾のみ（利用者名に「_12-34」が含まれるだけではマッチしない）。
+ * NN/MM は可変桁（Python の f"{n:02d}" が 100 以上で 3 桁になることと整合）。
+ */
+function parseChunkSuffixFromBasename_(nameWithoutExt) {
+  const chunkM = nameWithoutExt.match(/_(\d+)-(\d+)$/);
+  if (!chunkM) {
+    return { baseName: nameWithoutExt, chunkIndex: null, chunkTotal: null };
+  }
+  const ci = parseInt(chunkM[1], 10);
+  const ct = parseInt(chunkM[2], 10);
+  if (ci < 1 || ct < 1 || ci > ct || ct > 999) {
+    return { baseName: nameWithoutExt, chunkIndex: null, chunkTotal: null };
+  }
+  return {
+    baseName: nameWithoutExt.substring(0, nameWithoutExt.length - chunkM[0].length),
+    chunkIndex: ci,
+    chunkTotal: ct
+  };
+}
+
 function parseFileNameForUser(fileName) {
   const nameWithoutExt = fileName.replace(/\.[^.]+$/, '');
+  const chunkInfo = parseChunkSuffixFromBasename_(nameWithoutExt);
+  const nameForParse = chunkInfo.baseName;
 
-  const underscoreMatch = nameWithoutExt.match(/^(.+?)_(\d{4}[-_]\d{2}[-_]\d{2})/);
+  const underscoreMatch = nameForParse.match(/^(.+?)_(\d{4}[-_]\d{2}[-_]\d{2})/);
   if (underscoreMatch) {
     return {
       userName: underscoreMatch[1],
-      date: underscoreMatch[2].replace(/_/g, '-')
+      date: underscoreMatch[2].replace(/_/g, '-'),
+      chunkIndex: chunkInfo.chunkIndex,
+      chunkTotal: chunkInfo.chunkTotal
     };
   }
 
-  const reverseMatch = nameWithoutExt.match(/^(\d{4}[-_]\d{2}[-_]\d{2})_(.+)/);
+  const reverseMatch = nameForParse.match(/^(\d{4}[-_]\d{2}[-_]\d{2})_(.+)/);
   if (reverseMatch) {
     return {
       userName: reverseMatch[2],
-      date: reverseMatch[1].replace(/_/g, '-')
+      date: reverseMatch[1].replace(/_/g, '-'),
+      chunkIndex: chunkInfo.chunkIndex,
+      chunkTotal: chunkInfo.chunkTotal
     };
   }
 
-  const usIdx = nameWithoutExt.indexOf('_');
+  const usIdx = nameForParse.indexOf('_');
   if (usIdx > 0) {
-    const userName = nameWithoutExt.substring(0, usIdx);
-    const suffix = nameWithoutExt.substring(usIdx + 1);
+    const userName = nameForParse.substring(0, usIdx);
+    const suffix = nameForParse.substring(usIdx + 1);
     const dateFromSuffix = parseDateFromFileSuffix_(suffix);
     return {
       userName: userName,
-      date: dateFromSuffix || formatDate()
+      date: dateFromSuffix || formatDate(),
+      chunkIndex: chunkInfo.chunkIndex,
+      chunkTotal: chunkInfo.chunkTotal
     };
   }
 
   return {
-    userName: nameWithoutExt,
-    date: formatDate()
+    userName: nameForParse,
+    date: formatDate(),
+    chunkIndex: chunkInfo.chunkIndex,
+    chunkTotal: chunkInfo.chunkTotal
   };
 }
 

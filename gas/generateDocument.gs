@@ -244,18 +244,21 @@ function buildSheetNotesFromEvidence_(extractionData) {
 
 // --- 統合ドキュメント差し込み ---
 
-function fillMonitoringDocument(userMaster, recordText, sheetData) {
+/**
+ * @param {string} [chunkLabel] 例: 01/02（同一利用者・面談日で複数パートのときファイル名衝突を防ぐ）
+ */
+function fillMonitoringDocument(userMaster, recordText, sheetData, chunkLabel) {
   const templateIds = getTemplateIds();
   const folderIds = getFolderIds();
 
   if (!templateIds.monitoringDocument) {
     logWarn('Stage3', 'テンプレートID未設定。プレーンテキストで保存します');
-    return saveDocumentAsPlainText_(userMaster, recordText, sheetData);
+    return saveDocumentAsPlainText_(userMaster, recordText, sheetData, chunkLabel);
   }
 
   const replacements = buildAllReplacements_(userMaster, recordText, sheetData);
 
-  const fileName = `${formatJapaneseDate(userMaster.date)}_${userMaster.name}_計画モニタ（下書き）`;
+  const fileName = buildMonitoringDraftBaseFileName_(userMaster, chunkLabel);
 
   try {
     const docId = fillTemplate(
@@ -268,8 +271,17 @@ function fillMonitoringDocument(userMaster, recordText, sheetData) {
     return { docId: docId, url: getDocUrl(docId) };
   } catch (e) {
     logError('Stage3', `テンプレート差し込み失敗: ${e.message}`);
-    return saveDocumentAsPlainText_(userMaster, recordText, sheetData);
+    return saveDocumentAsPlainText_(userMaster, recordText, sheetData, chunkLabel);
   }
+}
+
+/** ドラフトのベースファイル名（拡張子なし）。チャンクがあると `…（下書き）_01-02` のようにサフィックスを付与 */
+function buildMonitoringDraftBaseFileName_(userMaster, chunkLabel) {
+  let base = `${formatJapaneseDate(userMaster.date)}_${userMaster.name}_計画モニタ（下書き）`;
+  if (chunkLabel && String(chunkLabel).trim()) {
+    base += '_' + String(chunkLabel).trim().replace(/\//g, '-');
+  }
+  return base;
 }
 
 
@@ -386,10 +398,10 @@ function buildCombinedSheetNotes_(sheetData) {
 
 // --- フォールバック: プレーンテキスト保存 ---
 
-function saveDocumentAsPlainText_(userMaster, recordText, sheetData) {
+function saveDocumentAsPlainText_(userMaster, recordText, sheetData, chunkLabel) {
   const folderIds = getFolderIds();
   const text = buildDocumentPlainText_(userMaster, recordText, sheetData);
-  const fileName = `${formatJapaneseDate(userMaster.date)}_${userMaster.name}_計画モニタ（下書き）.txt`;
+  const fileName = buildMonitoringDraftBaseFileName_(userMaster, chunkLabel) + '.txt';
   const file = saveTextToFile(folderIds.draft, fileName, text);
   logInfo('Stage3', `プレーンテキストで保存: ${fileName}`);
   return { docId: file.getId(), url: getFileUrl(file.getId()) };

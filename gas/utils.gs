@@ -232,6 +232,17 @@ function formatDate(date) {
   return Utilities.formatDate(date, 'Asia/Tokyo', 'yyyy-MM-dd');
 }
 
+/** 処理状況シートの面談日セル同士を比較するための yyyy-MM-dd キー */
+function normalizeInterviewDateKey_(value) {
+  if (value === '' || value === null || value === undefined) return '';
+  if (typeof value === 'string') {
+    const t = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+  }
+  const d = toNativeDate_(value);
+  return d ? formatDate(d) : '';
+}
+
 /**
  * GAS の getValues() が返す Date は instanceof Date が false になる場合がある。
  * typeof value.getTime === 'function' でダックタイピングして安全に判定する。
@@ -337,6 +348,20 @@ function formatDateTime(date) {
 }
 
 /**
+ * スプレッドシートが置かれているフォルダ（親が複数ある場合は先頭）。
+ * マイドライブ直下など親が取れない場合はマイドライブのルート。
+ */
+function getSpreadsheetParentFolder_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const file = DriveApp.getFileById(ss.getId());
+  const parents = file.getParents();
+  if (parents.hasNext()) {
+    return parents.next();
+  }
+  return DriveApp.getRootFolder();
+}
+
+/**
  * Drive 上にフォルダが存在するか（削除済みのIDは false）
  */
 function folderExists_(folderId) {
@@ -354,6 +379,15 @@ function createSubfolder(parentFolderId, name) {
   const existing = parent.getFoldersByName(name);
   if (existing.hasNext()) return existing.next();
   return parent.createFolder(name);
+}
+
+/** 同一フォルダ内の同名ファイルをすべてゴミ箱へ（重複作成・リトライ時の非決定性を防ぐ） */
+function trashFilesInFolderByName_(folderId, fileName) {
+  const folder = DriveApp.getFolderById(folderId);
+  const it = folder.getFilesByName(fileName);
+  while (it.hasNext()) {
+    it.next().setTrashed(true);
+  }
 }
 
 function saveTextToFile(folderId, fileName, content) {

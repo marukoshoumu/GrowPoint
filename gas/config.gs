@@ -24,12 +24,21 @@ const CONFIG = {
   STATUS: {
     QUEUED:         'QUEUED',
     STAGE1_RUNNING: 'STAGE1_RUNNING',
+    /** 分割音声の1パートのみ文字起こし済み。他パート待ち or マージ前 */
+    STAGE1_CHUNK_WAIT: 'STAGE1_CHUNK_WAIT',
     STAGE1_DONE:    'STAGE1_DONE',
     STAGE2_RUNNING: 'STAGE2_RUNNING',
     STAGE2_DONE:    'STAGE2_DONE',
     STAGE3_RUNNING: 'STAGE3_RUNNING',
     STAGE3_DONE:    'STAGE3_DONE',
     STAGE3_PARTIAL: 'STAGE3_PARTIAL',
+    /** 分割の非先頭チャンク。先頭行にマージ済み文字起こしが紐づく */
+    CHUNK_MERGED:   'CHUNK_MERGED',
+    /** Cloud Run 分割ジョブ投入済み。チャンク行が enqueue されたら SPLIT_SUPERSEDED に更新する */
+    SPLIT_PENDING:  'SPLIT_PENDING',
+    /** 同一利用者・面談日でチャンク処理が始まったため、長尺行はここでクローズ */
+    SPLIT_SUPERSEDED: 'SPLIT_SUPERSEDED',
+    SPLIT_FAILED:   'SPLIT_FAILED',
     ERROR:          'ERROR',
     APPROVED:       'APPROVED'
   },

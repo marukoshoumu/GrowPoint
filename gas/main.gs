@@ -82,8 +82,24 @@ function dispatchNextStage_(startTime) {
 
 /**
  * 新規音声ファイルをキューに登録する。
+ * 並行実行でコピー取込が二重になるのを防ぐためスクリプトロックを使用する。
  */
 function enqueueFile_(audioFile) {
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(20000);
+  } catch (e) {
+    logWarn('Main', 'enqueue ロック取得失敗（スキップ）', { file: audioFile.name, error: e.message });
+    return;
+  }
+  try {
+    enqueueFileLocked_(audioFile);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function enqueueFileLocked_(audioFile) {
   const parsed = parseFileNameForUser(audioFile.name);
 
   // 重複チェック（取り込み前・同一ファイルID）
@@ -95,14 +111,48 @@ function enqueueFile_(audioFile) {
     logInfo('Main', `重複スキップ: ${audioFile.name} (${audioFile.id})`);
     return;
   }
+  // 他者所有コピー取込後は処理IDがコピー側になるため、ダッシュボードでは元IDと一致しない。CLAIMED で抑止する。
+  if (getClaimedOriginalIdSet_()[audioFile.id]) {
+    logInfo('Main', `コピー取込済み元のためスキップ: ${audioFile.name} (${audioFile.id})`);
+    return;
+  }
   logInfo('Main', '重複チェック通過');
+
+  if (parsed.chunkIndex != null && parsed.chunkTotal != null) {
+    supersedeSplitPendingRowsForChunk_(parsed.userName, parsed.date);
+  }
+
+  if (shouldRouteToAudioSplitWorker_(audioFile, parsed)) {
+    const claimed = claimAudioForProcessing_(audioFile);
+    const processId = claimed.id;
+    const dashboardRow = addDashboardRow(
+      processId,
+      parsed.userName,
+      parsed.date,
+      claimed.name,
+      CONFIG.STATUS.SPLIT_PENDING,
+      ''
+    );
+    const ok = requestAudioSplitEnqueue_(claimed, parsed);
+    if (!ok) {
+      handleAudioSplitEnqueueFailure_(claimed, dashboardRow, '分割ワーカーへの依頼に失敗しました');
+    } else {
+      logInfo('Main', '分割ワーカーへ投入', { processId: processId, file: claimed.name });
+    }
+    return;
+  }
 
   const claimed = claimAudioForProcessing_(audioFile);
   const processId = claimed.id;
   logInfo('Main', 'claim完了', { processId: processId });
 
+  var chunkLabel = '';
+  if (parsed.chunkIndex && parsed.chunkTotal) {
+    chunkLabel = formatChunkLabel_(parsed.chunkIndex, parsed.chunkTotal);
+  }
+
   const dashboardRow = addDashboardRow(
-    processId, parsed.userName, parsed.date, claimed.name, CONFIG.STATUS.QUEUED
+    processId, parsed.userName, parsed.date, claimed.name, CONFIG.STATUS.QUEUED, chunkLabel
   );
 
   logInfo('Main', 'キュー登録完了', {
@@ -110,10 +160,10 @@ function enqueueFile_(audioFile) {
     file: claimed.name,
     user: parsed.userName,
     date: parsed.date,
+    chunk: chunkLabel || '(単一)',
     row: dashboardRow
   });
 }
-
 
 /**
  * Stage 1: 文字起こし
@@ -150,14 +200,25 @@ function executeStage1_(job) {
     return;
   }
 
-  const transcriptFileId = saveTranscript(
-    processingFolder.getId(), userName, interviewDate, stage1.data.transcript
-  );
-
-  updateDashboardStatus(job.rowNumber, {
-    'ステータス': CONFIG.STATUS.STAGE1_DONE,
-    '文字起こし': getFileUrl(transcriptFileId)
-  });
+  const chunk = parseChunkLabel_(job.chunkLabel || '');
+  if (chunk) {
+    const transcriptFileId = saveTranscriptChunk(
+      processingFolder.getId(), userName, interviewDate, stage1.data.transcript, chunk.chunkIndex
+    );
+    updateDashboardStatus(job.rowNumber, {
+      'ステータス': CONFIG.STATUS.STAGE1_CHUNK_WAIT,
+      '文字起こし': getFileUrl(transcriptFileId)
+    });
+    tryMergeChunkGroupAfterStage1_(userName, interviewDate, chunk.chunkTotal, processingFolder.getId());
+  } else {
+    const transcriptFileId = saveTranscript(
+      processingFolder.getId(), userName, interviewDate, stage1.data.transcript
+    );
+    updateDashboardStatus(job.rowNumber, {
+      'ステータス': CONFIG.STATUS.STAGE1_DONE,
+      '文字起こし': getFileUrl(transcriptFileId)
+    });
+  }
 
   logInfo('Main', `Stage1完了: ${job.processId}`);
 }
@@ -286,7 +347,7 @@ function executeStage3_(job) {
 
   if (stage3aOk || stage3bOk) {
     // 1つのテンプレートに統合差し込み（部分成功でも出力する）
-    const docResult = fillMonitoringDocument(userMaster, recordText, sheetData);
+    const docResult = fillMonitoringDocument(userMaster, recordText, sheetData, job.chunkLabel || '');
     updates['ドキュメントリンク'] = docResult.url;
 
     if (stage3aOk && stage3bOk) {
@@ -441,7 +502,7 @@ function initialSetup() {
   logInfo('Setup', '初回セットアップ完了');
   SpreadsheetApp.getUi().alert(
     'セットアップ完了\n\n'
-    + '1. Google Drive にフォルダ構成を確認してください\n'
+    + '1. Google Drive でフォルダ構成を確認してください（ルートはスプレッドシートと同じフォルダ内に作成されます）\n'
     + '2. 利用者マスターシートにデータを入力してください\n'
     + '3. テンプレートIDをScript Propertiesに設定してください\n'
     + '4. 音声ファイルを「01_未処理」フォルダにアップロードしてください'
@@ -479,10 +540,11 @@ function setupFolderStructure() {
   }
 
   if (!rootId) {
-    const rootFolder = DriveApp.createFolder(CONFIG.FOLDER_NAMES.ROOT);
+    const parent = getSpreadsheetParentFolder_();
+    const rootFolder = createSubfolder(parent.getId(), CONFIG.FOLDER_NAMES.ROOT);
     rootId = rootFolder.getId();
     props.setProperty('FOLDER_ID_ROOT', rootId);
-    logInfo('Setup', `ルートフォルダ作成: ${rootId}`);
+    logInfo('Setup', `ルートフォルダ作成（親: ${parent.getName()}）: ${rootId}`);
   }
 
   const folderMap = {

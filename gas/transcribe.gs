@@ -34,10 +34,25 @@ function runStage1(audioFileId) {
 }
 
 // TODO(Phase 1): 文字起こしファイルの暗号化 or アクセス制限
+function getChunkTranscriptBasePrefix_(userName, date) {
+  return normalizeSheetDateForFilename_(date) + '_' + userName + '_文字起こし';
+}
+
 function saveTranscript(folderId, userName, date, transcript) {
-  const fileName = `${normalizeSheetDateForFilename_(date)}_${userName}_文字起こし.txt`;
+  const fileName = getChunkTranscriptBasePrefix_(userName, date) + '.txt';
+  trashFilesInFolderByName_(folderId, fileName);
   const file = saveTextToFile(folderId, fileName, transcript);
   logInfo('Stage1', `文字起こしファイル保存: ${fileName}`);
+  return file.getId();
+}
+
+/** 分割音声: チャンク番号付き（例: …_文字起こし_01.txt） */
+function saveTranscriptChunk(folderId, userName, date, transcript, chunkIndex) {
+  const pad = chunkIndex < 10 ? '0' + chunkIndex : String(chunkIndex);
+  const fileName = getChunkTranscriptBasePrefix_(userName, date) + '_' + pad + '.txt';
+  trashFilesInFolderByName_(folderId, fileName);
+  const file = saveTextToFile(folderId, fileName, transcript);
+  logInfo('Stage1', `チャンク文字起こし保存: ${fileName}`);
   return file.getId();
 }
 

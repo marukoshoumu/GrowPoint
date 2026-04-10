@@ -2,7 +2,7 @@ const DASHBOARD_HEADERS = [
   '処理ID', '利用者名', '面談日', '音声ファイル',
   'ステータス', '文字起こし', '構造化抽出',
   'ドキュメントリンク', '処理開始', '処理完了',
-  'エラー内容', '担当者承認'
+  'エラー内容', '担当者承認', 'チャンク'
 ];
 
 function initDashboard() {
@@ -29,6 +29,84 @@ function initDashboard() {
 
   logInfo('Dashboard', 'ダッシュボード初期化完了');
   return sheet;
+}
+
+/** 既存シートに「チャンク」列が無ければ最右に追加する */
+function ensureStatusSheetChunkColumn_() {
+  const ssId = getSpreadsheetId();
+  if (!ssId) return;
+  const ss = SpreadsheetApp.openById(ssId);
+  const sheet = ss.getSheetByName(CONFIG.SHEET_NAMES.STATUS);
+  if (!sheet || sheet.getLastRow() < 1) return;
+  const lastCol = sheet.getLastColumn();
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  if (headers.indexOf('チャンク') !== -1) return;
+  sheet.getRange(1, lastCol + 1).setValue('チャンク');
+}
+
+
+function formatChunkLabel_(chunkIndex, chunkTotal) {
+  if (!chunkIndex || !chunkTotal) return '';
+  const zi = chunkIndex < 10 ? '0' + chunkIndex : String(chunkIndex);
+  const zt = chunkTotal < 10 ? '0' + chunkTotal : String(chunkTotal);
+  return zi + '/' + zt;
+}
+
+/** 処理状況シートの面談日を YYYY-MM-DD 文字列に揃えて比較する */
+function normalizeDashboardDate_(v) {
+  if (v === null || v === undefined || v === '') return '';
+  if (Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v.getTime())) {
+    return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+  const s = String(v).trim();
+  const iso = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (iso) return iso[1];
+  return s;
+}
+
+/**
+ * 長尺→チャンクに進んだとき、同一利用者・面談日の SPLIT_PENDING 行をクローズする。
+ * （チャンク行が enqueue されるタイミングで呼ぶ）
+ */
+function supersedeSplitPendingRowsForChunk_(userName, interviewDate) {
+  const ssId = getSpreadsheetId();
+  if (!ssId) return;
+  const ss = SpreadsheetApp.openById(ssId);
+  const sheet = ss.getSheetByName(CONFIG.SHEET_NAMES.STATUS);
+  if (!sheet || sheet.getLastRow() < 2) return;
+
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const col = {};
+  headers.forEach(function (h, i) { if (h) col[h] = i; });
+
+  const targetDate = normalizeDashboardDate_(interviewDate);
+  let n = 0;
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][col['ステータス']] !== CONFIG.STATUS.SPLIT_PENDING) continue;
+    if (data[i][col['利用者名']] !== userName) continue;
+    if (normalizeDashboardDate_(data[i][col['面談日']]) !== targetDate) continue;
+    updateDashboardStatus(i + 1, {
+      'ステータス': CONFIG.STATUS.SPLIT_SUPERSEDED,
+      'エラー内容': 'チャンク処理に引き継ぎ（長尺分割）',
+      '処理完了': formatDateTime()
+    });
+    n++;
+  }
+  if (n > 0) {
+    logInfo('Dashboard', `SPLIT_PENDING を SPLIT_SUPERSEDED に更新: ${n} 行`, { userName: userName, date: targetDate });
+  }
+}
+
+
+function parseChunkLabel_(label) {
+  if (!label || typeof label !== 'string') return null;
+  const m = String(label).trim().match(/^(\d{1,2})\/(\d{1,2})$/);
+  if (!m) return null;
+  const idx = parseInt(m[1], 10);
+  const tot = parseInt(m[2], 10);
+  if (idx < 1 || tot < 1 || idx > tot) return null;
+  return { chunkIndex: idx, chunkTotal: tot };
 }
 
 
@@ -96,7 +174,8 @@ function initLogSheet_(ss) {
 }
 
 
-function addDashboardRow(processId, userName, interviewDate, audioFileName, status) {
+function addDashboardRow(processId, userName, interviewDate, audioFileName, status, chunkLabel) {
+  ensureStatusSheetChunkColumn_();
   const ssId = getSpreadsheetId();
   const ss = SpreadsheetApp.openById(ssId);
   const sheet = ss.getSheetByName(CONFIG.SHEET_NAMES.STATUS);
@@ -109,7 +188,8 @@ function addDashboardRow(processId, userName, interviewDate, audioFileName, stat
     status,
     '', '', '',
     formatDateTime(),
-    '', '', ''
+    '', '', '',
+    chunkLabel || ''
   ];
 
   sheet.appendRow(row);
@@ -121,10 +201,12 @@ function updateDashboardStatus(rowNumber, updates) {
   const ssId = getSpreadsheetId();
   const ss = SpreadsheetApp.openById(ssId);
   const sheet = ss.getSheetByName(CONFIG.SHEET_NAMES.STATUS);
+  ensureStatusSheetChunkColumn_();
 
+  const hdrRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   const columnMap = {};
-  for (let i = 0; i < DASHBOARD_HEADERS.length; i++) {
-    columnMap[DASHBOARD_HEADERS[i]] = i + 1;
+  for (let i = 0; i < hdrRow.length; i++) {
+    if (hdrRow[i]) columnMap[hdrRow[i]] = i + 1;
   }
 
   const keys = Object.keys(updates);
@@ -203,6 +285,7 @@ function getDashboardSummary() {
   const ssId = getSpreadsheetId();
   const ss = SpreadsheetApp.openById(ssId);
   const sheet = ss.getSheetByName(CONFIG.SHEET_NAMES.STATUS);
+  ensureStatusSheetChunkColumn_();
   const data = sheet.getDataRange().getValues();
 
   const headers = data[0];
@@ -224,12 +307,17 @@ function getDashboardSummary() {
     switch (status) {
       case CONFIG.STATUS.QUEUED:         summary.queued++; break;
       case CONFIG.STATUS.STAGE1_RUNNING:
+      case CONFIG.STATUS.STAGE1_CHUNK_WAIT:
       case CONFIG.STATUS.STAGE1_DONE:
       case CONFIG.STATUS.STAGE2_RUNNING:
       case CONFIG.STATUS.STAGE2_DONE:
       case CONFIG.STATUS.STAGE3_RUNNING: summary.processing++; break;
       case CONFIG.STATUS.STAGE3_DONE:    summary.done++; break;
       case CONFIG.STATUS.STAGE3_PARTIAL: summary.partial++; break;
+      case CONFIG.STATUS.CHUNK_MERGED:   summary.done++; break;
+      case CONFIG.STATUS.SPLIT_PENDING:  summary.processing++; break;
+      case CONFIG.STATUS.SPLIT_SUPERSEDED: summary.done++; break;
+      case CONFIG.STATUS.SPLIT_FAILED:   summary.error++; break;
       case CONFIG.STATUS.APPROVED:       summary.approved++; break;
       case CONFIG.STATUS.ERROR:          summary.error++; break;
     }
@@ -244,6 +332,7 @@ function findRowsByStatus(targetStatus) {
   const sheet = ss.getSheetByName(CONFIG.SHEET_NAMES.STATUS);
   if (!sheet || sheet.getLastRow() < 2) return [];
 
+  ensureStatusSheetChunkColumn_();
   const data = sheet.getDataRange().getValues();
   const headers = data[0];
   const col = {};
@@ -252,6 +341,7 @@ function findRowsByStatus(targetStatus) {
   const results = [];
   for (let i = 1; i < data.length; i++) {
     if (data[i][col['ステータス']] === targetStatus) {
+      const chunkLabel = col['チャンク'] !== undefined ? (data[i][col['チャンク']] || '') : '';
       results.push({
         rowNumber: i + 1,
         processId: data[i][col['処理ID']],
@@ -260,7 +350,8 @@ function findRowsByStatus(targetStatus) {
         interviewDate: data[i][col['面談日']],
         transcriptUrl: data[i][col['文字起こし']],
         extractionUrl: data[i][col['構造化抽出']],
-        updatedAt: data[i][col['処理開始']]
+        updatedAt: data[i][col['処理開始']],
+        chunkLabel: chunkLabel
       });
     }
   }
