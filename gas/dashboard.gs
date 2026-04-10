@@ -65,6 +65,19 @@ function normalizeDashboardDate_(v) {
 }
 
 /**
+ * チャンク列の値をファイル名・parseChunkLabel_ 用の文字列に揃える。
+ * 「01/02」がシートで日付に解釈されると getValues() が Date になり、String(date) が
+ * 「Fri Jan 02 2026 …」のようになるため、Date は MM/dd に戻す。
+ */
+function normalizeChunkLabel_(v) {
+  if (v === null || v === undefined || v === '') return '';
+  if (Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v.getTime())) {
+    return Utilities.formatDate(v, Session.getScriptTimeZone(), 'MM/dd');
+  }
+  return String(v).trim();
+}
+
+/**
  * 長尺→チャンクに進んだとき、同一利用者・面談日の SPLIT_PENDING 行をクローズする。
  * （チャンク行が enqueue されるタイミングで呼ぶ）
  */
@@ -341,7 +354,8 @@ function findRowsByStatus(targetStatus) {
   const results = [];
   for (let i = 1; i < data.length; i++) {
     if (data[i][col['ステータス']] === targetStatus) {
-      const chunkLabel = col['チャンク'] !== undefined ? (data[i][col['チャンク']] || '') : '';
+      const rawChunk = col['チャンク'] !== undefined ? (data[i][col['チャンク']] || '') : '';
+      const chunkLabel = normalizeChunkLabel_(rawChunk);
       results.push({
         rowNumber: i + 1,
         processId: data[i][col['処理ID']],

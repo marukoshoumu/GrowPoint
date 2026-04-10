@@ -278,8 +278,9 @@ function fillMonitoringDocument(userMaster, recordText, sheetData, chunkLabel) {
 /** ドラフトのベースファイル名（拡張子なし）。チャンクがあると `…（下書き）_01-02` のようにサフィックスを付与 */
 function buildMonitoringDraftBaseFileName_(userMaster, chunkLabel) {
   let base = `${formatJapaneseDate(userMaster.date)}_${userMaster.name}_計画モニタ（下書き）`;
-  if (chunkLabel && String(chunkLabel).trim()) {
-    base += '_' + String(chunkLabel).trim().replace(/\//g, '-');
+  const chunk = normalizeChunkLabel_(chunkLabel);
+  if (chunk) {
+    base += '_' + chunk.replace(/\//g, '-');
   }
   return base;
 }

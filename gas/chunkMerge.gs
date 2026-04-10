@@ -93,7 +93,7 @@ function hasStage1ChunkWaitForGroup_(userName, dateKey, chunkTotal) {
     const row = data[r];
     if (row[col['利用者名']] !== userName) continue;
     if (normalizeInterviewDateKey_(row[col['面談日']]) !== dateKey) continue;
-    const cl = parseChunkLabel_(row[col['チャンク']] || '');
+    const cl = parseChunkLabel_(normalizeChunkLabel_(row[col['チャンク']] || ''));
     if (!cl || cl.chunkTotal !== chunkTotal) continue;
     if (row[col['ステータス']] === CONFIG.STATUS.STAGE1_CHUNK_WAIT) return true;
   }
@@ -158,7 +158,7 @@ function applyChunkMergeToDashboard_(userName, dateKey, chunkTotal, mergedUrl) {
     const row = data[r];
     if (row[col['利用者名']] !== userName) continue;
     if (normalizeInterviewDateKey_(row[col['面談日']]) !== dateKey) continue;
-    const cl = parseChunkLabel_(row[col['チャンク']] || '');
+    const cl = parseChunkLabel_(normalizeChunkLabel_(row[col['チャンク']] || ''));
     if (!cl || cl.chunkTotal !== chunkTotal) continue;
     if (row[col['ステータス']] !== CONFIG.STATUS.STAGE1_CHUNK_WAIT) continue;
     chunkWaitRows.push({
