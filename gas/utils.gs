@@ -41,7 +41,33 @@ function appendToLogSheet_(timestamp, level, context, message, data) {
   ]);
 }
 
+/**
+ * Gemini File API へ音声をアップロード。帯域・レート制限（429 等）はリトライする。
+ */
 function uploadToGeminiFileApi(driveFileId) {
+  const maxRetries = CONFIG.MAX_RETRIES;
+  let lastError;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return uploadToGeminiFileApiOnce_(driveFileId);
+    } catch (e) {
+      lastError = e;
+      const msg = e && e.message ? String(e.message) : '';
+      if (attempt < maxRetries && isGeminiFileUploadRetriable_(msg)) {
+        const delayMs = geminiFileUploadRetryDelayMs_(msg, attempt);
+        logWarn('FileAPI', `アップロードリトライ ${attempt + 1}/${maxRetries + 1}（${delayMs}ms 待機）`, {
+          error: redactApiKeyInText_(msg).substring(0, 400)
+        });
+        Utilities.sleep(delayMs);
+      } else {
+        break;
+      }
+    }
+  }
+  throw lastError;
+}
+
+function uploadToGeminiFileApiOnce_(driveFileId) {
   const apiKey = getApiKey();
   const file = DriveApp.getFileById(driveFileId);
   const blob = file.getBlob();
@@ -63,15 +89,52 @@ function uploadToGeminiFileApi(driveFileId) {
   });
 
   const responseCode = response.getResponseCode();
+  const rawText = response.getContentText();
   if (responseCode !== 200) {
-    throw new Error(`Gemini File API upload error (${responseCode}): ${response.getContentText()}`);
+    const detail = parseGeminiApiErrorDetail_(rawText);
+    throw new Error(`Gemini File API upload error (${responseCode}): ${detail}`);
   }
 
-  const result = JSON.parse(response.getContentText());
+  const result = JSON.parse(rawText);
   const fileUri = result.file.uri;
 
   logInfo('FileAPI', `アップロード完了: ${fileUri}`);
   return fileUri;
+}
+
+/** ログ・例外文から API キーを伏せる */
+function redactApiKeyInText_(s) {
+  return String(s).replace(/key=[A-Za-z0-9_-]{10,}/gi, 'key=***');
+}
+
+function parseGeminiApiErrorDetail_(rawText) {
+  try {
+    const j = JSON.parse(rawText);
+    if (j.error && j.error.message) return String(j.error.message);
+  } catch (_) {}
+  return String(rawText || '').substring(0, 800);
+}
+
+function isGeminiFileUploadRetriable_(message) {
+  if (!message) return false;
+  if (/\((429|500|502|503)\)/.test(message)) return true;
+  if (/帯域|帯域幅|bandwidth|rate limit|quota|RESOURCE_EXHAUSTED|Too Many Requests/i.test(message)) {
+    return true;
+  }
+  return false;
+}
+
+/** アップロードはデータ量が大きいため、generateContent より長めに待つ */
+function geminiFileUploadRetryDelayMs_(errorMessage, attemptZeroBased) {
+  const base = 8000 * (attemptZeroBased + 1);
+  const m = errorMessage && errorMessage.match(/Please retry in ([\d.]+)\s*s/i);
+  if (m) {
+    return Math.max(base, Math.ceil(parseFloat(m[1], 10) * 1000) + 1000);
+  }
+  if (errorMessage && /429|\(429\)|帯域|bandwidth/i.test(errorMessage)) {
+    return Math.max(base, 20000);
+  }
+  return base;
 }
 
 // TODO(Phase 1): APIキーのローテーション検討
@@ -352,7 +415,20 @@ function formatDateTime(date) {
  * マイドライブ直下など親が取れない場合はマイドライブのルート。
  */
 function getSpreadsheetParentFolder_() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) {
+    var sid = getSpreadsheetId();
+    if (sid) {
+      try {
+        ss = SpreadsheetApp.openById(sid);
+      } catch (e) {
+        throw new Error('スプレッドシートを開けませんでした（SPREADSHEET_ID）。 ' + e.message);
+      }
+    }
+    if (!ss) {
+      throw new Error('アクティブなスプレッドシートがありません。スプレッドシートを開くか、Script Properties に SPREADSHEET_ID を設定してください。');
+    }
+  }
   const file = DriveApp.getFileById(ss.getId());
   const parents = file.getParents();
   if (parents.hasNext()) {

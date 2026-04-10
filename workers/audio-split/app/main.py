@@ -26,7 +26,6 @@ from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2 import id_token
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
-import io
 
 try:
     from google.cloud import tasks_v2
@@ -83,14 +82,63 @@ def _drive_service():
     return build("drive", "v3", cache_discovery=False)
 
 
+CHUNK_SECONDS_DEFAULT = 1200
+CHUNK_SECONDS_MIN = 30
+CHUNK_SECONDS_MAX = 14400  # 4 hours
+
+
+def _parse_chunk_seconds(raw: Any) -> int:
+    """payload の chunkSeconds を安全に整数化し、範囲外はクランプ。無効時はデフォルト。"""
+    if raw is None or raw == "":
+        return CHUNK_SECONDS_DEFAULT
+    if isinstance(raw, bool):
+        logger.warning(
+            "chunkSeconds invalid (bool), using default %s", CHUNK_SECONDS_DEFAULT
+        )
+        return CHUNK_SECONDS_DEFAULT
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        logger.warning(
+            "chunkSeconds invalid %r, using default %s", raw, CHUNK_SECONDS_DEFAULT
+        )
+        return CHUNK_SECONDS_DEFAULT
+    if n <= 0:
+        logger.warning(
+            "chunkSeconds must be positive (got %s), using default %s",
+            n,
+            CHUNK_SECONDS_DEFAULT,
+        )
+        return CHUNK_SECONDS_DEFAULT
+    if n < CHUNK_SECONDS_MIN or n > CHUNK_SECONDS_MAX:
+        clamped = max(CHUNK_SECONDS_MIN, min(CHUNK_SECONDS_MAX, n))
+        logger.warning(
+            "chunkSeconds %s out of range [%s, %s], clamping to %s",
+            n,
+            CHUNK_SECONDS_MIN,
+            CHUNK_SECONDS_MAX,
+            clamped,
+        )
+        return clamped
+    return n
+
+
+def _ffmpeg_timeout_sec() -> int:
+    raw = _env("FFMPEG_TIMEOUT_SEC", "300")
+    try:
+        t = int(raw or "300")
+    except (TypeError, ValueError):
+        return 300
+    return max(1, t)
+
+
 def _download_file(svc, file_id: str, dest: Path) -> None:
     request_media = svc.files().get_media(fileId=file_id, supportsAllDrives=True)
-    fh = io.BytesIO()
-    downloader = MediaIoBaseDownload(fh, request_media)
-    done = False
-    while not done:
-        _status, done = downloader.next_chunk()
-    dest.write_bytes(fh.getvalue())
+    with dest.open("wb") as out_f:
+        downloader = MediaIoBaseDownload(out_f, request_media)
+        done = False
+        while not done:
+            _status, done = downloader.next_chunk()
 
 
 def _probe_duration_sec(path: Path) -> float:
@@ -120,7 +168,7 @@ def _run_split_job(payload: dict[str, Any]) -> None:
     file_id = payload.get("fileId")
     user_name = _sanitize_segment(str(payload.get("userName") or "user"))
     date_str = str(payload.get("date") or "")[:32]
-    chunk_seconds = int(payload.get("chunkSeconds") or 1200)
+    chunk_seconds = _parse_chunk_seconds(payload.get("chunkSeconds"))
     unprocessed_id = payload.get("unprocessedFolderId")
     error_id = payload.get("errorFolderId")
 
@@ -149,26 +197,54 @@ def _run_split_job(payload: dict[str, Any]) -> None:
             mm = n_chunks
             out_name = f"{user_name}_{date_str}_{nn:02d}-{mm:02d}.m4a"
             out_path = tmp_root / out_name
-            subprocess.run(
-                [
-                    "ffmpeg",
-                    "-y",
-                    "-ss",
-                    str(start),
-                    "-i",
-                    str(local_in),
-                    "-t",
-                    str(this_len),
-                    "-c:a",
-                    "aac",
-                    "-b:a",
-                    "128k",
-                    str(out_path),
-                ],
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-            )
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-ss",
+                str(start),
+                "-i",
+                str(local_in),
+                "-t",
+                str(this_len),
+                "-c:a",
+                "aac",
+                "-b:a",
+                "128k",
+                str(out_path),
+            ]
+            timeout_sec = _ffmpeg_timeout_sec()
+            try:
+                subprocess.run(
+                    cmd,
+                    check=True,
+                    timeout=timeout_sec,
+                    capture_output=True,
+                    text=True,
+                )
+            except subprocess.TimeoutExpired as e:
+                err_tail = ""
+                if e.stdout or e.stderr:
+                    err_tail = ((e.stdout or "") + (e.stderr or ""))[-4000:]
+                logger.error(
+                    "ffmpeg timeout after %ss chunk=%s/%s fileId=%s tail=%s",
+                    timeout_sec,
+                    nn,
+                    mm,
+                    file_id,
+                    err_tail,
+                )
+                raise
+            except subprocess.CalledProcessError as e:
+                out = ((e.stdout or "") + (e.stderr or ""))[-4000:]
+                logger.error(
+                    "ffmpeg failed rc=%s chunk=%s/%s fileId=%s: %s",
+                    e.returncode,
+                    nn,
+                    mm,
+                    file_id,
+                    out,
+                )
+                raise
             chunk_paths.append(out_path)
 
         # アップロード（全成功後に元ファイルを処理）
