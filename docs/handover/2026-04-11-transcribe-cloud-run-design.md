@@ -2,7 +2,20 @@
 
 > **作成日**: 2026-04-11
 > **背景**: GAS の6分実行上限により Stage1（Gemini 文字起こし）がタイムアウト → `STAGE1_RUNNING` ゾンビ化 → チャンクマージ詰まり。ファイルサイズに関わらず発生するため、全件を Cloud Run に移行する。
-> **参照**: `docs/handover/2026-04-11_GAS-Stage1-時間制限とチャンク詰まり調査.md`
+> **参照**: `docs/handover/2026-04-11_GAS-Stage1-時間制限とチャンク詰まり調査.md`  
+> **レビュー**: `docs/handover/2026-04-11-transcribe-cloud-run-design-review.md`  
+> **改訂**: 2026-04-11 — レビュー指摘を検証・反映（リトライ上限、タイムアウト根拠、冪等化、ファイル名一致保証、max-instances、Gemini File API 保持期間）
+
+### プロダクト決定事項（レビュー質問への回答・2026-04-11）
+
+| 項目 | 決定内容 |
+|------|----------|
+| 失敗時のシート | **`ERROR` に必ず落とさなくてよい**。**`QUEUED` に戻して再試行**で十分。 |
+| Cloud Tasks 冪等性 | **task name に `processId` を使う方針を許容**（採用可）。 |
+| プロンプト・処理範囲 | **約1時間分の音声ファイルが処理できる範囲**で、プロンプトサイズ・`maxOutputTokens`・チャンク分割・ワーカータイムアウトを整合させる。 |
+| サービスアカウント | **音声分割ワーカー（`audio-split`）と同一 SA** でよい。 |
+| Gemini API キー | **GAS（Script Properties）と同一キー** でよい。 |
+| リトライ・コスト | **リトライを重ね、最終的にシステム側で処理が完結すればよい**（稀な二重生成の厳密排除は不要）。 |
 
 ---
 
@@ -47,6 +60,14 @@ GAS 次トリガー
 
 チャンク処理の構造は変更なし。Cloud Run が個別チャンクの `.txt` を保存し、GAS 側の既存マージロジック（`tryMergeChunkGroupAfterStage1_`）がそのまま動作する。ファイル命名規約を守ることが前提。
 
+### ファイル名一致の保証
+
+ポーリングは「所定ファイル名が Drive に存在するか」で判定する。1文字でも違うと永久に `STAGE1_PENDING` になるため、以下で一致を保証する:
+
+- ファイル名は payload の `date`（`yyyy-MM-dd` 文字列）と `userName` をそのまま結合して生成。GAS 側のポーリングも同じ payload 値を使用する。
+- Cloud Run 側の命名ロジックは GAS の `getChunkTranscriptBasePrefix_` / `formatChunkTranscriptIndexPad_` と同一仕様。
+- **実装時にファイル名生成のユニットテスト**（GAS 側の期待値と Python 側の出力を、同一入力で照合）を作成する。
+
 ---
 
 ## 2. Cloud Run transcribe ワーカー
@@ -90,6 +111,7 @@ GAS 次トリガー
 
 - `chunkIndex` / `chunkTotal`: チャンクの場合は整数、単一ファイルは `null`
 - `prompt`: GAS 側で `getStage1Prompt(glossary)` を組み立てて含める（Cloud Run はプロンプトロジックを持たない）
+- **ペイロードサイズ**: Cloud Tasks の HTTP ボディ上限は 1MB。現行のプロンプト（数KB）+ 用語集（100項目でも数KB）は十分マージンあり。将来用語集が極端に肥大した場合は `prompt` を GCS/Drive 経由に切り替えを検討。
 
 ### 出力ファイル命名
 
@@ -151,7 +173,7 @@ ffmpeg 不要のため、音声分割ワーカーより軽量。
 
 ### 3-B. `dispatchNextStage_()` にポーリングステップ追加
 
-`QUEUED → Stage1` ループの前に、`STAGE1_PENDING` 行のポーリングを挿入:
+`QUEUED → Stage1` ループの前に、`STAGE1_PENDING` 行のポーリングを挿入する。PENDING を先に処理する理由: 結果確認は軽量（Drive ファイル検索のみ）で、先に DONE に進めた方がパイプライン全体のスループットが上がる。PENDING 行数は通常少数（5分間隔で enqueue された分のみ）のため、新規取り込みへの影響は実用上問題ない。
 
 ```javascript
 // STAGE1_PENDING → 結果ファイル確認 → STAGE1_DONE or STAGE1_CHUNK_WAIT
@@ -186,12 +208,32 @@ for (let i = 0; i < pendingJobs.length; i++) {
 { status: STAGE1_PENDING, recoverTo: QUEUED }     // 60分
 ```
 
-60分に延長する理由: Cloud Tasks のリトライ（最大3回、バックオフ30秒）分の余裕を確保。
+**60分の根拠（数式）**:
+- Cloud Run タイムアウト: 900秒 × 最大3回リトライ = 2700秒
+- Cloud Tasks バックオフ: 30秒 × 3回 = 90秒
+- GAS ポーリング余裕: 300秒（1トリガー分）
+- 合計: 2700 + 90 + 300 = 3090秒 ≈ **52分**
+- 60分はこの上限に約15%のマージンを加えた値。
+
+### 3-D2. リトライ上限による ERROR 落とし
+
+`recoverTimedOutJobs_` で `QUEUED` に戻すだけでは、永続的な失敗（API キー無効、Drive 権限喪失等）で無限ループになる。`STAGE1_PENDING` → `QUEUED` への戻し回数をダッシュボードの「エラー内容」列で追跡し、**3回超過で `ERROR` に落とす**。
+
+```
+1回目タイムアウト: QUEUED に戻す（エラー内容: "タイムアウト回復 (1/3)"）
+2回目: QUEUED に戻す（エラー内容: "タイムアウト回復 (2/3)"）
+3回目: QUEUED に戻す（エラー内容: "タイムアウト回復 (3/3)"）
+4回目: ERROR に落とす（エラー内容: "リトライ上限超過"）
+```
 
 ### 3-E. GAS 側で不要になるコード
 
 - `runStage1()` 内の Gemini 呼び出し部分（関数削除。`transcribe.gs` の保存系関数 `saveTranscript`, `saveTranscriptChunk` 等は Cloud Run 側で同等処理するが、ポーリング時のファイル名生成で `getChunkTranscriptBasePrefix_` 等を引き続き使用するため残す）
 - `uploadToGeminiFileApi()`: Stage2 では不使用（テキスト入力のみ）だが、一旦残す
+
+### 3-F. `dashboard.gs` の `getDashboardSummary()` 更新
+
+switch 文に `STAGE1_PENDING` を `processing` として追加し、`STAGE1_RUNNING` を削除する。
 
 ---
 
@@ -208,6 +250,7 @@ for (let i = 0; i < pendingJobs.length; i++) {
 | CPU | 1 | API 呼び出し主体で CPU 負荷低い |
 | 認証 | `--no-allow-unauthenticated` | Cloud Tasks OIDC + 共有秘密 |
 | 同時実行 | 1 | 1リクエスト=1文字起こしで長時間占有 |
+| 最大インスタンス | 5 | Gemini API レートリミットとの兼ね合い。タスク大量投入時のコスト・並列制御 |
 
 ### 環境変数 / Secret
 
@@ -248,8 +291,13 @@ for (let i = 0; i < pendingJobs.length; i++) {
 
 ### 重複実行の防止
 
+- **Cloud Tasks の task name に `processId` を使用**し、同一ジョブの重複投入を Tasks 側で排除する
 - `STAGE1_PENDING` 行は `dispatchNextStage_` の `QUEUED` ループでスキップされる
-- Cloud Tasks の重複配信で `/execute` が2回走った場合: 同名ファイルの上書きで実害なし
+- Cloud Tasks の重複配信で `/execute` が2回走った場合: 同名ファイルの上書きで実害は限定的（主にコスト。task name 冪等化で軽減）
+
+### Gemini File API のファイル保持
+
+ワーカーがアップロードした Gemini File API のファイルは **48時間で自動削除**される（GCP 仕様）。明示的な削除処理は不要。
 
 ---
 
@@ -357,7 +405,8 @@ gcloud run deploy transcribe \
   --service-account="${SA_EMAIL}" \
   --timeout=900 \
   --memory=1Gi \
-  --concurrency=1
+  --concurrency=1 \
+  --max-instances=5
 ```
 
 `CLOUD_RUN_SERVICE_URL` は初回デプロイ後に出力される URL で再デプロイして更新する。
