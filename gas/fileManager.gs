@@ -243,6 +243,7 @@ function parseDateFromFileSuffix_(suffix) {
     }
   }
 
+  // 末尾6桁 YYMMDD: 年は常に 20YY として 2000–2099 にマップ（2100 年以降はこの分岐では解釈しない）
   const end6 = suffix.match(/(\d{2})(\d{2})(\d{2})$/);
   if (end6) {
     const mm = parseInt(end6[2], 10);

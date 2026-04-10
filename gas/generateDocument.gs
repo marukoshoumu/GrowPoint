@@ -275,12 +275,28 @@ function fillMonitoringDocument(userMaster, recordText, sheetData, chunkLabel) {
   }
 }
 
+/**
+ * チャンクラベルを Drive ドキュメント名に使うサフィックスへ（ディレクトリ区画・制御文字・過長を抑止）。
+ * 英数字・日本語・._- および全角スペース程度を許可し、それ以外は '-' に潰す。
+ */
+function sanitizeChunkLabelForFilename_(chunkLabel) {
+  let t = normalizeChunkLabel_(chunkLabel);
+  if (!t) return '';
+  t = t.replace(/\.\./g, '');
+  t = t.replace(/[\x00-\x1F\x7F\\]/g, '');
+  t = t.replace(/\//g, '-');
+  t = t.replace(/[^0-9A-Za-z._\-\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\u3400-\u9FFF]/g, '-');
+  t = t.replace(/-+/g, '-').replace(/^-|-$/g, '');
+  if (t.length > 50) t = t.substring(0, 50).replace(/-+$/g, '');
+  return t;
+}
+
 /** ドラフトのベースファイル名（拡張子なし）。チャンクがあると `…（下書き）_01-02` のようにサフィックスを付与 */
 function buildMonitoringDraftBaseFileName_(userMaster, chunkLabel) {
   let base = `${formatJapaneseDate(userMaster.date)}_${userMaster.name}_計画モニタ（下書き）`;
-  const chunk = normalizeChunkLabel_(chunkLabel);
+  const chunk = sanitizeChunkLabelForFilename_(chunkLabel);
   if (chunk) {
-    base += '_' + chunk.replace(/\//g, '-');
+    base += '_' + chunk;
   }
   return base;
 }

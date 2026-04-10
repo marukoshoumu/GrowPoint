@@ -46,9 +46,19 @@ function saveTranscript(folderId, userName, date, transcript) {
   return file.getId();
 }
 
-/** 分割音声: チャンク番号付き（例: …_文字起こし_01.txt） */
-function saveTranscriptChunk(folderId, userName, date, transcript, chunkIndex) {
-  const pad = chunkIndex < 10 ? '0' + chunkIndex : String(chunkIndex);
+/**
+ * チャンク連番のゼロ埋め幅（chunkTotal に合わせる。1〜9 チャンクでも従来どおり最低2桁）
+ * @param {number} chunkIndex
+ * @param {number} chunkTotal
+ */
+function formatChunkTranscriptIndexPad_(chunkIndex, chunkTotal) {
+  const w = Math.max(String(chunkTotal).length, 2);
+  return String(chunkIndex).padStart(w, '0');
+}
+
+/** 分割音声: チャンク番号付き（例: …_文字起こし_01.txt、100 チャンク超は桁が増える） */
+function saveTranscriptChunk(folderId, userName, date, transcript, chunkIndex, chunkTotal) {
+  const pad = formatChunkTranscriptIndexPad_(chunkIndex, chunkTotal);
   const fileName = getChunkTranscriptBasePrefix_(userName, date) + '_' + pad + '.txt';
   trashFilesInFolderByName_(folderId, fileName);
   const file = saveTextToFile(folderId, fileName, transcript);

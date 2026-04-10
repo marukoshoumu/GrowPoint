@@ -457,12 +457,21 @@ function createSubfolder(parentFolderId, name) {
   return parent.createFolder(name);
 }
 
-/** 同一フォルダ内の同名ファイルをすべてゴミ箱へ（重複作成・リトライ時の非決定性を防ぐ） */
+/**
+ * 同一フォルダ内の同名ファイルをすべてゴミ箱へ（重複作成・リトライ時の非決定性を防ぐ）。
+ * @returns {boolean} フォルダを開けて処理できたら true。folderId が無効などで Drive が例外を投げた場合は false（呼び出し側は戻り値を無視してよい）。
+ */
 function trashFilesInFolderByName_(folderId, fileName) {
-  const folder = DriveApp.getFolderById(folderId);
-  const it = folder.getFilesByName(fileName);
-  while (it.hasNext()) {
-    it.next().setTrashed(true);
+  try {
+    const folder = DriveApp.getFolderById(folderId);
+    const it = folder.getFilesByName(fileName);
+    while (it.hasNext()) {
+      it.next().setTrashed(true);
+    }
+    return true;
+  } catch (e) {
+    Logger.log('trashFilesInFolderByName_: フォルダ取得または削除に失敗 folderId=' + folderId + ' fileName=' + fileName + ' err=' + e);
+    return false;
   }
 }
 

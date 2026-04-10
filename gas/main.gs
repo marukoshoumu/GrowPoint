@@ -203,7 +203,7 @@ function executeStage1_(job) {
   const chunk = parseChunkLabel_(job.chunkLabel || '');
   if (chunk) {
     const transcriptFileId = saveTranscriptChunk(
-      processingFolder.getId(), userName, interviewDate, stage1.data.transcript, chunk.chunkIndex
+      processingFolder.getId(), userName, interviewDate, stage1.data.transcript, chunk.chunkIndex, chunk.chunkTotal
     );
     updateDashboardStatus(job.rowNumber, {
       'ステータス': CONFIG.STATUS.STAGE1_CHUNK_WAIT,

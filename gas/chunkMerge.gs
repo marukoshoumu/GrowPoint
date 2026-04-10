@@ -32,22 +32,16 @@ function tryMergeChunkGroupAfterStage1Core_(userName, interviewDate, chunkTotal,
     return;
   }
 
+  const parts = [];
   for (let i = 1; i <= chunkTotal; i++) {
-    const pad = i < 10 ? '0' + i : String(i);
+    const pad = formatChunkTranscriptIndexPad_(i, chunkTotal);
     const name = prefix + '_' + pad + '.txt';
-    if (!getNewestFileByName_(folder, name)) {
+    const file = getNewestFileByName_(folder, name);
+    if (!file) {
       logInfo('ChunkMerge', 'チャンク未そろいのためマージ待ち: ' + name);
       return;
     }
-  }
-
-  const parts = [];
-  for (let j = 1; j <= chunkTotal; j++) {
-    const pad2 = j < 10 ? '0' + j : String(j);
-    const fname = prefix + '_' + pad2 + '.txt';
-    const file = getNewestFileByName_(folder, fname);
-    if (!file) return;
-    dedupeFilesByNameKeepNewest_(folder, fname, file.getId());
+    dedupeFilesByNameKeepNewest_(folder, name, file.getId());
     parts.push(file.getBlob().getDataAsString());
   }
 
@@ -130,7 +124,7 @@ function dedupeFilesByNameKeepNewest_(folder, fileName, keepFileId) {
 
 function trashChunkPartTextFiles_(folder, prefix, chunkTotal) {
   for (let i = 1; i <= chunkTotal; i++) {
-    const pad = i < 10 ? '0' + i : String(i);
+    const pad = formatChunkTranscriptIndexPad_(i, chunkTotal);
     const name = prefix + '_' + pad + '.txt';
     const it = folder.getFilesByName(name);
     while (it.hasNext()) {

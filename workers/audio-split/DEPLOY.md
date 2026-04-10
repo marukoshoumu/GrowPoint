@@ -93,7 +93,7 @@ docker push "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${IMAGE}:${TAG}"
 
 ### 4.1 初回、または環境変数・SA をまとめて指定するとき
 
-サービス名を **`audio-split`** とした例です。秘密値は実際の値に置き換えてください。
+サービス名を **`audio-split`** とした例です。**`SPLIT_AUTH_SECRET` は `--set-env-vars` に平文で埋め込まず**、Secret Manager と `--set-secrets`（または `--env-vars-file`）を推奨します（シェル履歴・CI ログ漏えい防止）。秘密作成後、ランタイム SA に `roles/secretmanager.secretAccessor` を付与してください。
 
 ```bash
 gcloud run deploy audio-split \
@@ -101,7 +101,8 @@ gcloud run deploy audio-split \
   --region="${REGION}" \
   --project="${PROJECT_ID}" \
   --no-allow-unauthenticated \
-  --set-env-vars="SPLIT_AUTH_SECRET=YOUR_SECRET,GCP_PROJECT=${PROJECT_ID},CLOUD_TASKS_LOCATION=${REGION},CLOUD_TASKS_QUEUE=audio-split,CLOUD_TASKS_INVOKER_SA_EMAIL=YOUR_TASKS_INVOKER_SA@...iam.gserviceaccount.com,CLOUD_RUN_SERVICE_URL=https://YOUR-SERVICE-URL.run.app" \
+  --set-secrets="SPLIT_AUTH_SECRET=split-auth-secret:latest" \
+  --set-env-vars="GCP_PROJECT=${PROJECT_ID},CLOUD_TASKS_LOCATION=${REGION},CLOUD_TASKS_QUEUE=audio-split,CLOUD_TASKS_INVOKER_SA_EMAIL=YOUR_TASKS_INVOKER_SA@...iam.gserviceaccount.com,CLOUD_RUN_SERVICE_URL=https://YOUR-SERVICE-URL.run.app" \
   --service-account="YOUR_DRIVE_WORKER_SA@...iam.gserviceaccount.com" \
   --timeout=900 \
   --memory=2Gi

@@ -5,6 +5,9 @@ const DASHBOARD_HEADERS = [
   'エラー内容', '担当者承認', 'チャンク'
 ];
 
+/** 同一実行内で「チャンク」列の存在確認を繰り返さない */
+var statusSheetChunkColumnEnsured_ = false;
+
 function initDashboard() {
   const ssId = getSpreadsheetId();
   const ss = SpreadsheetApp.openById(ssId);
@@ -33,6 +36,7 @@ function initDashboard() {
 
 /** 既存シートに「チャンク」列が無ければ最右に追加する */
 function ensureStatusSheetChunkColumn_() {
+  if (statusSheetChunkColumnEnsured_) return;
   const ssId = getSpreadsheetId();
   if (!ssId) return;
   const ss = SpreadsheetApp.openById(ssId);
@@ -40,8 +44,12 @@ function ensureStatusSheetChunkColumn_() {
   if (!sheet || sheet.getLastRow() < 1) return;
   const lastCol = sheet.getLastColumn();
   const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-  if (headers.indexOf('チャンク') !== -1) return;
+  if (headers.indexOf('チャンク') !== -1) {
+    statusSheetChunkColumnEnsured_ = true;
+    return;
+  }
   sheet.getRange(1, lastCol + 1).setValue('チャンク');
+  statusSheetChunkColumnEnsured_ = true;
 }
 
 
@@ -94,19 +102,19 @@ function supersedeSplitPendingRowsForChunk_(userName, interviewDate) {
   headers.forEach(function (h, i) { if (h) col[h] = i; });
 
   const targetDate = normalizeDashboardDate_(interviewDate);
+  const ts = formatDateTime();
   let n = 0;
   for (let i = 1; i < data.length; i++) {
     if (data[i][col['ステータス']] !== CONFIG.STATUS.SPLIT_PENDING) continue;
     if (data[i][col['利用者名']] !== userName) continue;
     if (normalizeDashboardDate_(data[i][col['面談日']]) !== targetDate) continue;
-    updateDashboardStatus(i + 1, {
-      'ステータス': CONFIG.STATUS.SPLIT_SUPERSEDED,
-      'エラー内容': 'チャンク処理に引き継ぎ（長尺分割）',
-      '処理完了': formatDateTime()
-    });
+    data[i][col['ステータス']] = CONFIG.STATUS.SPLIT_SUPERSEDED;
+    data[i][col['エラー内容']] = 'チャンク処理に引き継ぎ（長尺分割）';
+    data[i][col['処理完了']] = ts;
     n++;
   }
   if (n > 0) {
+    sheet.getRange(1, 1, data.length, data[0].length).setValues(data);
     logInfo('Dashboard', `SPLIT_PENDING を SPLIT_SUPERSEDED に更新: ${n} 行`, { userName: userName, date: targetDate });
   }
 }

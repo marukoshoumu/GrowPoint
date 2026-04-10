@@ -26,6 +26,12 @@ GAS が `POST /enqueue` を呼び出すと、**Cloud Tasks** 経由で `POST /ex
 
 ※ OIDC 検証に必須。ローカルで秘密のみ試す場合は `/execute` に Bearer を付けて直接 POST 可能。
 
+### セキュリティのベストプラクティス
+
+- **`SPLIT_AUTH_SECRET`**: 推奨は **暗号学的にランダムな 32 バイト以上**（Base64 や hex で 256 bit 相当）を `openssl rand -base64 32` などで生成する。平文の短い語句は避ける。運用では **3〜12 か月ごとのローテーション**を目安にし、新しい値を Cloud Run / Secret Manager に反映したうえで旧値を失効させる（GAS 側の `AUDIO_SPLIT_SECRET` も同時更新）。
+- **秘密の保管**: `--set-env-vars` に平文で埋め込まず、**Secret Manager**（または `--set-secrets` / `--env-vars-file` で参照）に置き、シェル履歴・CI ログに残さない。例: `echo -n "$SPLIT_AUTH_SECRET" | gcloud secrets versions add split-auth-secret --data-file=-` のようにパイプで登録し、ランタイムでは `--set-secrets=SPLIT_AUTH_SECRET=split-auth-secret:latest` で注入。
+- **`ALLOW_INLINE_EXECUTE`**: **開発専用**。本番で `1` にしたまま共有秘密を有効にすると、インライン実行経路のリスクが増えるため **必ず `0`（未設定）** にする。
+
 ## ローカル試験（Docker）
 
 ```bash
@@ -60,7 +66,8 @@ gcloud run deploy audio-split \
   --image=REGION-docker.pkg.dev/PROJECT/REPO/audio-split:TAG \
   --region=asia-northeast1 \
   --no-allow-unauthenticated \
-  --set-env-vars=SPLIT_AUTH_SECRET=...,GCP_PROJECT=...,CLOUD_TASKS_LOCATION=asia-northeast1,CLOUD_TASKS_QUEUE=audio-split,CLOUD_TASKS_INVOKER_SA_EMAIL=tasks-invoker@....iam.gserviceaccount.com,CLOUD_RUN_SERVICE_URL=https://audio-split-xxxxx.run.app \
+  --set-secrets=SPLIT_AUTH_SECRET=split-auth-secret:latest \
+  --set-env-vars=GCP_PROJECT=...,CLOUD_TASKS_LOCATION=asia-northeast1,CLOUD_TASKS_QUEUE=audio-split,CLOUD_TASKS_INVOKER_SA_EMAIL=tasks-invoker@....iam.gserviceaccount.com,CLOUD_RUN_SERVICE_URL=https://audio-split-xxxxx.run.app \
   --service-account=DRIVE_WORKER_SA@....iam.gserviceaccount.com \
   --timeout=900 \
   --memory=2Gi

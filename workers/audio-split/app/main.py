@@ -142,20 +142,46 @@ def _download_file(svc, file_id: str, dest: Path) -> None:
 
 
 def _probe_duration_sec(path: Path) -> float:
-    out = subprocess.check_output(
-        [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            str(path),
-        ],
-        stderr=subprocess.STDOUT,
-    )
-    return float(out.decode().strip())
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(path),
+    ]
+    try:
+        out = subprocess.check_output(
+            cmd,
+            stderr=subprocess.STDOUT,
+            timeout=60,
+        )
+    except subprocess.TimeoutExpired as e:
+        logger.error("ffprobe timeout path=%s err=%s", path, e)
+        raise RuntimeError(f"ffprobe timed out: {path}") from e
+    except subprocess.CalledProcessError as e:
+        tail = ""
+        if e.output:
+            tail = e.output.decode(errors="replace")[-2000:]
+        logger.error(
+            "ffprobe failed rc=%s path=%s tail=%s",
+            e.returncode,
+            path,
+            tail,
+        )
+        raise RuntimeError(f"ffprobe failed for {path}") from e
+    text = out.decode(errors="replace").strip()
+    try:
+        return float(text)
+    except ValueError as e:
+        logger.error(
+            "ffprobe returned non-numeric duration path=%s text=%r",
+            path,
+            text[:500],
+        )
+        raise RuntimeError(f"invalid ffprobe duration for {path}: {text!r}") from e
 
 
 def _sanitize_segment(s: str) -> str:
@@ -355,7 +381,10 @@ def enqueue():
                 try:
                     _run_split_job(payload)
                 except Exception:
-                    pass
+                    logger.exception(
+                        "inline split job failed fileId=%s",
+                        payload.get("fileId"),
+                    )
 
             threading.Thread(target=_bg, daemon=True).start()
             return jsonify({"queued": "inline", "warning": "dev only"}), 202
