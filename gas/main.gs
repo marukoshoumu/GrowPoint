@@ -366,7 +366,16 @@ function executeStage3_(job) {
   updateDashboardStatus(job.rowNumber, updates);
 
   if (stage3aOk || stage3bOk) {
-    tryArchiveAudioToExtractedFolder_(job.processId, userName, interviewDate);
+    const chunkMeta = parseChunkLabel_(normalizeChunkLabel_(job.chunkLabel || ''));
+    if (chunkMeta && chunkMeta.chunkTotal > 1) {
+      syncChunkGroupAfterLeaderStage3_(userName, interviewDate, chunkMeta.chunkTotal, {
+        completedAt: updates['処理完了'],
+        docUrl: updates['ドキュメントリンク'] || '',
+        extractionUrl: job.extractionUrl || ''
+      });
+    } else {
+      tryArchiveAudioToExtractedFolder_(job.processId, userName, interviewDate);
+    }
   }
 
   logInfo('Main', `Stage3完了: ${job.processId}`, {

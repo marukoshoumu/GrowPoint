@@ -205,3 +205,55 @@ function applyChunkMergeToDashboard_(userName, dateKey, chunkTotal, mergedUrl) {
   logInfo('ChunkMerge', 'ダッシュボード更新: リーダー行 ' + leaderRow + ' (chunkIndex=' + leader.chunkIndex + '), 従属 ' + followerRows.length + ' 行');
   return true;
 }
+
+
+/**
+ * リーダー行の Stage3 完了後: CHUNK_MERGED の従属行に処理完了・成果物リンクを複写し、
+ * 同一チャンクグループの全元音声を 03 配下へ移動する（従属のみ従来アーカイブされていなかった）。
+ */
+function syncChunkGroupAfterLeaderStage3_(userName, interviewDate, chunkTotal, fields) {
+  ensureStatusSheetChunkColumn_();
+  const dateKey = normalizeInterviewDateKey_(interviewDate);
+  const ss = SpreadsheetApp.openById(getSpreadsheetId());
+  const sheet = ss.getSheetByName(CONFIG.SHEET_NAMES.STATUS);
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const col = {};
+  headers.forEach(function(h, i) { col[h] = i; });
+
+  const audioIdsToArchive = [];
+
+  for (let r = 1; r < data.length; r++) {
+    const row = data[r];
+    if (row[col['利用者名']] !== userName) continue;
+    if (normalizeInterviewDateKey_(row[col['面談日']]) !== dateKey) continue;
+    const cl = parseChunkLabel_(normalizeChunkLabel_(row[col['チャンク']] || ''));
+    if (!cl || cl.chunkTotal !== chunkTotal) continue;
+
+    const status = row[col['ステータス']];
+    const processId = row[col['処理ID']];
+    if (!processId) continue;
+
+    if (status === CONFIG.STATUS.CHUNK_MERGED) {
+      updateDashboardStatus(r + 1, {
+        '処理完了': fields.completedAt,
+        'ドキュメントリンク': fields.docUrl || '',
+        '構造化抽出': fields.extractionUrl || ''
+      });
+    }
+
+    if (status === CONFIG.STATUS.CHUNK_MERGED
+        || status === CONFIG.STATUS.STAGE3_DONE
+        || status === CONFIG.STATUS.STAGE3_PARTIAL) {
+      audioIdsToArchive.push(processId);
+    }
+  }
+
+  const seen = {};
+  for (let i = 0; i < audioIdsToArchive.length; i++) {
+    const id = audioIdsToArchive[i];
+    if (seen[id]) continue;
+    seen[id] = true;
+    tryArchiveAudioToExtractedFolder_(id, userName, interviewDate);
+  }
+}
