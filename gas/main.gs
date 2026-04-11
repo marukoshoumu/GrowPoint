@@ -515,12 +515,17 @@ function isRecoverableStage2Error_(msg) {
   return false;
 }
 
-/** "Stage2再試行 (N/M)" から N を抽出。無ければ 0。 */
+/** "Stage2再試行 (N/M)" の N の最大値（複数行・追記後も想定）。無ければ 0。 */
 function parseStage2ErrorRecoverCount_(errorContent) {
   if (!errorContent) return 0;
-  var m = errorContent.match(/Stage2再試行\s*\((\d+)\//);
-  if (m) return parseInt(m[1], 10);
-  return 0;
+  var re = /Stage2再試行\s*\((\d+)\//g;
+  var max = 0;
+  var m;
+  while ((m = re.exec(errorContent)) !== null) {
+    var n = parseInt(m[1], 10);
+    if (n > max) max = n;
+  }
+  return max;
 }
 
 
@@ -528,6 +533,8 @@ function handleError_(processId, dashboardRow, errorMessage) {
   logError('Main', errorMessage, { processId: processId });
 
   var msgOut = String(errorMessage);
+  // Stage2再試行 (N/M) のカウント進行は recoverTimedOutJobs_ のみ。ここでは進めない。
+  // STAGE1_DONE 直後など、セルに残った「Stage2再試行 (N/M) 前回:…」を追記して recover が N を解釈できるようにする。
   if (msgOut.indexOf('Stage2失敗') !== -1) {
     try {
       var ss = SpreadsheetApp.openById(getSpreadsheetId());
@@ -536,10 +543,8 @@ function handleError_(processId, dashboardRow, errorMessage) {
       var ci = hdr.indexOf('エラー内容');
       if (ci !== -1) {
         var prev = String(sheet.getRange(dashboardRow, ci + 1).getValue() || '');
-        var pr = parseStage2ErrorRecoverCount_(prev);
-        if (pr > 0) {
-          var num = Math.min(pr + 1, CONFIG.STAGE2_ERROR_RECOVER_MAX);
-          msgOut = 'Stage2再試行 (' + num + '/' + CONFIG.STAGE2_ERROR_RECOVER_MAX + ') ' + msgOut;
+        if (prev && parseStage2ErrorRecoverCount_(prev) > 0) {
+          msgOut = msgOut + '\n---\n' + prev;
         }
       }
     } catch (ignore) {}

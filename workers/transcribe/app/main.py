@@ -147,6 +147,14 @@ def _move_audio_to_error_folder(svc: Any, file_id: str, error_folder_id: str) ->
             fields="id, parents",
             supportsAllDrives=True,
         ).execute()
+    elif error_folder_id:
+        # 親なし（API 上は稀）でもエラーフォルダへ取り込む。ゴミ箱は error_folder_id 未設定時のみ。
+        svc.files().update(
+            fileId=file_id,
+            addParents=error_folder_id,
+            fields="id, parents",
+            supportsAllDrives=True,
+        ).execute()
     else:
         svc.files().update(
             fileId=file_id, body={"trashed": True}, supportsAllDrives=True
@@ -209,7 +217,7 @@ def _header_safe_upload_display_name(name: str) -> str:
     suffix = p.suffix.lower()
     if not suffix:
         suffix = ".bin"
-    stem = p.stem if suffix else raw
+    stem = p.stem
     safe = "".join(
         c if 32 <= ord(c) < 127 and c not in '\\/:*?"<>|' else "_"
         for c in stem
