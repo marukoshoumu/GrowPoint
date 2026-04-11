@@ -135,3 +135,35 @@ class TestCloudTasksTaskResourceName:
         name = _cloud_tasks_task_resource_name(parent, pid)
         assert len(name) <= 500
         assert "transcribe-" in name
+
+
+class TestHeaderSafeUploadDisplayName:
+    """Gemini X-Goog-Upload-Display-Name は HTTP ヘッダー用に ASCII のみ。"""
+
+    def test_ascii_preserved(self):
+        from app.main import _header_safe_upload_display_name
+
+        assert _header_safe_upload_display_name("meeting_2026-04-11.m4a") == "meeting_2026-04-11.m4a"
+
+    def test_japanese_replaced_with_hash_stem(self):
+        from app.main import _header_safe_upload_display_name
+
+        out = _header_safe_upload_display_name("メンバーAモニ_2026-04-11_01-02.m4a")
+        assert out.endswith(".m4a")
+        assert out.isascii()
+        assert "メ" not in out
+
+    def test_mixed_ascii_and_cjk(self):
+        from app.main import _header_safe_upload_display_name
+
+        out = _header_safe_upload_display_name("foo_齊藤.m4a")
+        assert out == "foo.m4a"
+        assert out.isascii()
+
+    def test_all_cjk_uses_hash(self):
+        from app.main import _header_safe_upload_display_name
+
+        out = _header_safe_upload_display_name("齊藤.m4a")
+        assert out.endswith(".m4a")
+        assert out.startswith("audio_")
+        assert out.isascii()

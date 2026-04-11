@@ -198,13 +198,37 @@ def _upload_text_to_drive(svc, folder_id: str, file_name: str, text: str) -> str
 # Gemini API
 # ---------------------------------------------------------------------------
 
+def _header_safe_upload_display_name(name: str) -> str:
+    """
+    X-Goog-Upload-Display-Name 用。requests/urllib3 は HTTP ヘッダーを latin-1 で送るため、
+    日本語ファイル名のままだと UnicodeEncodeError になる。印字可能 ASCII のみにし、
+    空になった場合は content のハッシュで一意な名前にする。
+    """
+    raw = (name or "").strip() or "audio.bin"
+    p = Path(raw)
+    suffix = p.suffix.lower()
+    if not suffix:
+        suffix = ".bin"
+    stem = p.stem if suffix else raw
+    safe = "".join(
+        c if 32 <= ord(c) < 127 and c not in '\\/:*?"<>|' else "_"
+        for c in stem
+    )
+    safe = re.sub(r"_+", "_", safe).strip("._")
+    if not safe:
+        safe = "audio_" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+    out = f"{safe}{suffix}"
+    return out[:255]
+
+
 def _upload_to_gemini_file_api(api_key: str, file_path: Path, display_name: str, mime_type: str) -> str:
     """Gemini File API にアップロードし、fileUri を返す。"""
+    safe_display = _header_safe_upload_display_name(display_name)
     url = f"{GEMINI_API_BASE}/upload/v1beta/files?key={api_key}"
     with file_path.open("rb") as f:
         resp = requests.post(
             url,
-            headers={"X-Goog-Upload-Display-Name": display_name},
+            headers={"X-Goog-Upload-Display-Name": safe_display},
             data=f,
             timeout=300,
         )

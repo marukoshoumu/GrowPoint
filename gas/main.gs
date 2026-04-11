@@ -230,7 +230,8 @@ function executeStage1_(job) {
 function executeStage2_(job) {
   logInfo('Main', `Stage2開始: ${job.processId}`);
   updateDashboardStatus(job.rowNumber, {
-    'ステータス': CONFIG.STATUS.STAGE2_RUNNING
+    'ステータス': CONFIG.STATUS.STAGE2_RUNNING,
+    '処理開始': formatDateTime()
   });
 
   const userName = job.userName;
@@ -269,7 +270,8 @@ function executeStage2_(job) {
 
   updateDashboardStatus(job.rowNumber, {
     'ステータス': CONFIG.STATUS.STAGE2_DONE,
-    '構造化抽出': getFileUrl(extractionFileId)
+    '構造化抽出': getFileUrl(extractionFileId),
+    'エラー内容': ''
   });
 
   logInfo('Main', `Stage2完了: ${job.processId}`);
@@ -282,7 +284,8 @@ function executeStage2_(job) {
 function executeStage3_(job) {
   logInfo('Main', `Stage3開始: ${job.processId}`);
   updateDashboardStatus(job.rowNumber, {
-    'ステータス': CONFIG.STATUS.STAGE3_RUNNING
+    'ステータス': CONFIG.STATUS.STAGE3_RUNNING,
+    '処理開始': formatDateTime()
   });
 
   const userName = job.userName;
@@ -441,6 +444,23 @@ function recoverTimedOutJobs_() {
     }
   }
 
+  // Stage2 が ERROR かつ JSON/トークン切れ等の一時失敗 → STAGE1_DONE に戻して次回から Stage2 再実行
+  var errorJobs = findRowsByStatus(CONFIG.STATUS.ERROR);
+  for (var e = 0; e < errorJobs.length; e++) {
+    var errMsg = errorJobs[e].errorContent != null ? String(errorJobs[e].errorContent) : '';
+    if (!isRecoverableStage2Error_(errMsg)) continue;
+    var s2count = parseStage2ErrorRecoverCount_(errMsg);
+    if (s2count >= CONFIG.STAGE2_ERROR_RECOVER_MAX) {
+      continue;
+    }
+    var newS2 = s2count + 1;
+    logWarn('Main', 'Stage2 ERROR 自動再試行 (' + newS2 + '/' + CONFIG.STAGE2_ERROR_RECOVER_MAX + '): ' + errorJobs[e].processId);
+    updateDashboardStatus(errorJobs[e].rowNumber, {
+      'ステータス': CONFIG.STATUS.STAGE1_DONE,
+      'エラー内容': 'Stage2再試行 (' + newS2 + '/' + CONFIG.STAGE2_ERROR_RECOVER_MAX + ') 前回: ' + errMsg.substring(0, 400)
+    });
+  }
+
   // STAGE1_PENDING 回復（60 分、リトライカウンタ付き）
   var pendingJobs = findRowsByStatus(CONFIG.STATUS.STAGE1_PENDING);
   for (var p = 0; p < pendingJobs.length; p++) {
@@ -480,13 +500,54 @@ function parseRecoverCount_(errorContent) {
   return 0;
 }
 
+/**
+ * Stage2失敗の ERROR で、JSON 切れ・トークン上限・実行時間切れ等の再試行に値するか。
+ * マスター不備などの恒久的エラーは false。
+ */
+function isRecoverableStage2Error_(msg) {
+  if (!msg || msg.indexOf('Stage2失敗') === -1) return false;
+  if (msg.indexOf('マスターに見つかりません') !== -1) return false;
+  if (msg.indexOf('マスター取得失敗') !== -1) return false;
+  var markers = ['JSON', 'Unterminated', 'MAX_TOKENS', 'finishReason', 'SyntaxError', 'Unexpected', 'truncat', '起動時間の最大値'];
+  for (var i = 0; i < markers.length; i++) {
+    if (msg.indexOf(markers[i]) !== -1) return true;
+  }
+  return false;
+}
+
+/** "Stage2再試行 (N/M)" から N を抽出。無ければ 0。 */
+function parseStage2ErrorRecoverCount_(errorContent) {
+  if (!errorContent) return 0;
+  var m = errorContent.match(/Stage2再試行\s*\((\d+)\//);
+  if (m) return parseInt(m[1], 10);
+  return 0;
+}
+
 
 function handleError_(processId, dashboardRow, errorMessage) {
   logError('Main', errorMessage, { processId: processId });
 
+  var msgOut = String(errorMessage);
+  if (msgOut.indexOf('Stage2失敗') !== -1) {
+    try {
+      var ss = SpreadsheetApp.openById(getSpreadsheetId());
+      var sheet = ss.getSheetByName(CONFIG.SHEET_NAMES.STATUS);
+      var hdr = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+      var ci = hdr.indexOf('エラー内容');
+      if (ci !== -1) {
+        var prev = String(sheet.getRange(dashboardRow, ci + 1).getValue() || '');
+        var pr = parseStage2ErrorRecoverCount_(prev);
+        if (pr > 0) {
+          var num = Math.min(pr + 1, CONFIG.STAGE2_ERROR_RECOVER_MAX);
+          msgOut = 'Stage2再試行 (' + num + '/' + CONFIG.STAGE2_ERROR_RECOVER_MAX + ') ' + msgOut;
+        }
+      }
+    } catch (ignore) {}
+  }
+
   updateDashboardStatus(dashboardRow, {
     'ステータス': CONFIG.STATUS.ERROR,
-    'エラー内容': errorMessage,
+    'エラー内容': msgOut,
     '処理完了': formatDateTime()
   });
 }

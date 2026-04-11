@@ -48,9 +48,11 @@ const CONFIG = {
   STAGE1_MAX_OUTPUT_TOKENS: 65536,
 
   STAGE_TIME_LIMIT_MS: 4 * 60 * 1000,   // 4 min (2 min margin from 6 min limit)
-  TIMEOUT_THRESHOLD_MS: 30 * 60 * 1000,   // 30 min timeout
+  TIMEOUT_THRESHOLD_MS: 30 * 60 * 1000,   // 30 min timeout（RUNNING 系・処理開始からの経過）
   TRANSCRIBE_TIMEOUT_THRESHOLD_MS: 60 * 60 * 1000,  // 60 min (900s*3 retries + backoff + margin)
   TRANSCRIBE_MAX_RECOVER_COUNT: 3,                    // QUEUED 戻しの上限（超過で ERROR）
+  /** Stage2 が ERROR 落ちしたうち JSON 切れ・トークン切れ等で STAGE1_DONE に戻して再試行する上限 */
+  STAGE2_ERROR_RECOVER_MAX: 3,
 
   /** Stage2 構造化抽出: flash-liteはJSON出力サイズ制御が不安定なため、flashを使用 */
   STAGE2_MODEL: 'gemini-2.5-flash',
