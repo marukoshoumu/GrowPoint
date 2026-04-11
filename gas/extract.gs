@@ -21,7 +21,8 @@ function runStage2(transcript, userMaster) {
           model: CONFIG.STAGE2_MODEL,
           temperature: 0.1,
           maxTokens: CONFIG.STAGE2_MAX_OUTPUT_TOKENS,
-          responseMimeType: 'application/json'
+          responseMimeType: 'application/json',
+          thinkingBudget: CONFIG.STAGE2_THINKING_BUDGET
         }, 0);
 
         lastOutput = apiText;

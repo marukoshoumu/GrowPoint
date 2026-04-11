@@ -56,7 +56,9 @@ const CONFIG = {
 
   /** Stage2 構造化抽出: flash-liteはJSON出力サイズ制御が不安定なため、flashを使用 */
   STAGE2_MODEL: 'gemini-2.5-flash',
-  STAGE2_MAX_OUTPUT_TOKENS: 65536
+  STAGE2_MAX_OUTPUT_TOKENS: 65536,
+  /** Stage2 thinking予算: 出力JSONにトークンを確保するためthinkingを制限 */
+  STAGE2_THINKING_BUDGET: 8192
 };
 
 function getApiKey() {

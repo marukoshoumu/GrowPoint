@@ -34,7 +34,7 @@ function dispatchNextStage_(startTime) {
   const elapsed = () => Date.now() - startTime;
 
   // STAGE1_PENDING → 結果ファイルポーリング → STAGE1_DONE or STAGE1_CHUNK_WAIT
-  var pendingJobs = findRowsByStatus(CONFIG.STATUS.STAGE1_PENDING);
+  var pendingJobs = sortStage1PendingJobsByChunkIndex_(findRowsByStatus(CONFIG.STATUS.STAGE1_PENDING));
   for (var i = 0; i < pendingJobs.length; i++) {
     if (elapsed() > CONFIG.STAGE_TIME_LIMIT_MS) {
       logInfo('Main', 'タイムリミット到達（Stage1ポーリング中）');
@@ -415,6 +415,69 @@ function extractFileIdFromUrl_(url) {
 
 
 /**
+ * メニューから手動実行: 閾値を無視して停滞ジョブを即座にリカバリする。
+ * STAGE1_PENDING → QUEUED, STAGE2_RUNNING → STAGE1_DONE, STAGE3_RUNNING → STAGE2_DONE,
+ * および再試行可能な ERROR → STAGE1_DONE。
+ */
+function manualRecoverStuckJobs() {
+  var recovered = 0;
+
+  // STAGE1_PENDING → QUEUED（リトライカウンタ維持）
+  var pendingJobs = findRowsByStatus(CONFIG.STATUS.STAGE1_PENDING);
+  for (var p = 0; p < pendingJobs.length; p++) {
+    var errorContent = pendingJobs[p].errorContent != null ? String(pendingJobs[p].errorContent) : '';
+    var recoverCount = parseRecoverCount_(errorContent);
+    if (recoverCount >= CONFIG.TRANSCRIBE_MAX_RECOVER_COUNT) continue;
+    var newCount = recoverCount + 1;
+    logWarn('Main', '手動リカバリ STAGE1_PENDING → QUEUED (' + newCount + '/' + CONFIG.TRANSCRIBE_MAX_RECOVER_COUNT + '): ' + pendingJobs[p].processId);
+    updateDashboardStatus(pendingJobs[p].rowNumber, {
+      'ステータス': CONFIG.STATUS.QUEUED,
+      'エラー内容': '手動リカバリ (' + newCount + '/' + CONFIG.TRANSCRIBE_MAX_RECOVER_COUNT + ')'
+    });
+    recovered++;
+  }
+
+  // STAGE2_RUNNING / STAGE3_RUNNING → 前ステージに戻す
+  var runningStatuses = [
+    { status: CONFIG.STATUS.STAGE2_RUNNING, recoverTo: CONFIG.STATUS.STAGE1_DONE },
+    { status: CONFIG.STATUS.STAGE3_RUNNING, recoverTo: CONFIG.STATUS.STAGE2_DONE }
+  ];
+  for (var s = 0; s < runningStatuses.length; s++) {
+    var jobs = findRowsByStatus(runningStatuses[s].status);
+    for (var i = 0; i < jobs.length; i++) {
+      logWarn('Main', '手動リカバリ ' + runningStatuses[s].status + ' → ' + runningStatuses[s].recoverTo + ': ' + jobs[i].processId);
+      updateDashboardStatus(jobs[i].rowNumber, {
+        'ステータス': runningStatuses[s].recoverTo,
+        'エラー内容': '手動リカバリ (前ステータス: ' + runningStatuses[s].status + ')'
+      });
+      recovered++;
+    }
+  }
+
+  // 再試行可能な ERROR → STAGE1_DONE（カウンタ維持）
+  var errorJobs = findRowsByStatus(CONFIG.STATUS.ERROR);
+  for (var e = 0; e < errorJobs.length; e++) {
+    var errMsg = errorJobs[e].errorContent != null ? String(errorJobs[e].errorContent) : '';
+    if (!isRecoverableStage2Error_(errMsg)) continue;
+    var s2count = parseStage2ErrorRecoverCount_(errMsg);
+    if (s2count >= CONFIG.STAGE2_ERROR_RECOVER_MAX) continue;
+    var newS2 = s2count + 1;
+    logWarn('Main', '手動リカバリ Stage2 ERROR → STAGE1_DONE (' + newS2 + '/' + CONFIG.STAGE2_ERROR_RECOVER_MAX + '): ' + errorJobs[e].processId);
+    updateDashboardStatus(errorJobs[e].rowNumber, {
+      'ステータス': CONFIG.STATUS.STAGE1_DONE,
+      'エラー内容': 'Stage2再試行 (' + newS2 + '/' + CONFIG.STAGE2_ERROR_RECOVER_MAX + ') 手動リカバリ 前回: ' + errMsg.substring(0, 400)
+    });
+    recovered++;
+  }
+
+  var msg = recovered > 0
+    ? recovered + ' 件のジョブをリカバリしました。次回の処理実行で再処理されます。'
+    : 'リカバリ対象のジョブはありませんでした。';
+  SpreadsheetApp.getUi().alert(msg);
+}
+
+
+/**
  * タイムアウトしたジョブ（_RUNNING/_PENDING 状態で一定時間経過）を前ステージに戻す。
  * STAGE1_PENDING はリトライカウンタ付き: 3回超過で ERROR に落とす。
  */
@@ -727,6 +790,7 @@ function onOpen() {
     .addItem('初回セットアップ', 'initialSetup')
     .addSeparator()
     .addItem('今すぐ処理実行', 'processNewFiles')
+    .addItem('停滞ジョブを手動リカバリ', 'manualRecoverStuckJobs')
     .addItem('ダッシュボードサマリー', 'showSummary')
     .addSeparator()
     .addItem('テンプレート確認', 'showTemplateStatus')

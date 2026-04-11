@@ -386,3 +386,29 @@ function findRowsByStatus(targetStatus) {
   }
   return results;
 }
+
+/**
+ * STAGE1_PENDING のみ: 同一利用者・面談日ではチャンク番号昇順（01→02）に並べる。
+ * シート行順が 02→01 のとき先にマージが走り、_01.txt だけ STAGE1_PENDING のまま
+ * ゴミ箱にされゼンビ詰まりになるのを防ぐ（chunkMerge.gs と整合）。
+ */
+function sortStage1PendingJobsByChunkIndex_(jobs) {
+  return jobs.slice().sort(function(a, b) {
+    var ua = String(a.userName || '');
+    var ub = String(b.userName || '');
+    if (ua !== ub) return ua < ub ? -1 : ua > ub ? 1 : 0;
+    var da = normalizeInterviewDateKey_(a.interviewDate);
+    var db = normalizeInterviewDateKey_(b.interviewDate);
+    if (da !== db) return da < db ? -1 : da > db ? 1 : 0;
+
+    var pa = parseChunkLabel_(normalizeChunkLabel_(a.chunkLabel || ''));
+    var pb = parseChunkLabel_(normalizeChunkLabel_(b.chunkLabel || ''));
+    if (pa && pb) {
+      if (pa.chunkTotal !== pb.chunkTotal) return pa.chunkTotal - pb.chunkTotal;
+      return pa.chunkIndex - pb.chunkIndex;
+    }
+    if (pa && !pb) return 1;
+    if (!pa && pb) return -1;
+    return (a.rowNumber || 0) - (b.rowNumber || 0);
+  });
+}

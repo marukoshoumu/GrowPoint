@@ -174,6 +174,12 @@ function callGeminiApi(prompt, options) {
     generationConfig: generationConfig
   };
 
+  if (options.thinkingBudget != null) {
+    payload.generationConfig.thinkingConfig = {
+      thinkingBudget: options.thinkingBudget
+    };
+  }
+
   const fetchOptions = {
     method: 'post',
     contentType: 'application/json',
