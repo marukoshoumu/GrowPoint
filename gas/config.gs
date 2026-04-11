@@ -23,7 +23,7 @@ const CONFIG = {
 
   STATUS: {
     QUEUED:         'QUEUED',
-    STAGE1_RUNNING: 'STAGE1_RUNNING',
+    STAGE1_PENDING: 'STAGE1_PENDING',
     /** 分割音声の1パートのみ文字起こし済み。他パート待ち or マージ前 */
     STAGE1_CHUNK_WAIT: 'STAGE1_CHUNK_WAIT',
     STAGE1_DONE:    'STAGE1_DONE',
@@ -49,6 +49,8 @@ const CONFIG = {
 
   STAGE_TIME_LIMIT_MS: 4 * 60 * 1000,   // 4 min (2 min margin from 6 min limit)
   TIMEOUT_THRESHOLD_MS: 30 * 60 * 1000,   // 30 min timeout
+  TRANSCRIBE_TIMEOUT_THRESHOLD_MS: 60 * 60 * 1000,  // 60 min (900s*3 retries + backoff + margin)
+  TRANSCRIBE_MAX_RECOVER_COUNT: 3,                    // QUEUED 戻しの上限（超過で ERROR）
 
   /** Stage2 構造化抽出: flash-liteはJSON出力サイズ制御が不安定なため、flashを使用 */
   STAGE2_MODEL: 'gemini-2.5-flash',
