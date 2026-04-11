@@ -71,6 +71,38 @@ gcloud artifacts repositories list --location="${REGION}" --project="${PROJECT_I
 gcloud services enable drive.googleapis.com --project="${PROJECT_ID}"
 ```
 
+### 2.4 Secret Manager（`split-auth-secret`）とランタイム SA
+
+Cloud Run で `--set-secrets="SPLIT_AUTH_SECRET=split-auth-secret:latest"` を使う前に、次を実施します。
+
+#### 2.4.1 Secret Manager API の有効化
+
+```bash
+gcloud services enable secretmanager.googleapis.com --project="${PROJECT_ID}"
+```
+
+API が無効だと、シークレット参照時に `secretmanager.googleapis.com` 関連のエラーになります。
+
+#### 2.4.2 シークレット作成と `roles/secretmanager.secretAccessor`
+
+1. シークレット **`split-auth-secret`** を作成します（値はランダム文字列。例は README の運用に合わせてください）。
+
+   ```bash
+   echo -n "$(openssl rand -base64 32)" | gcloud secrets create split-auth-secret \
+     --data-file=- --project="${PROJECT_ID}"
+   ```
+
+2. **ランタイム用サービスアカウント**（`gcloud run deploy` の `--service-account` で指定する SA）に、少なくとも **`roles/secretmanager.secretAccessor`** を付与します。
+
+   ```bash
+   gcloud secrets add-iam-policy-binding split-auth-secret \
+     --project="${PROJECT_ID}" \
+     --member="serviceAccount:YOUR_DRIVE_WORKER_SA@...iam.gserviceaccount.com" \
+     --role="roles/secretmanager.secretAccessor"
+   ```
+
+秘密の作成と上記 IAM 設定が済んでから `--set-secrets` でデプロイしてください（平文を `--set-env-vars` に埋め込まない）。
+
 ---
 
 ## 3. ビルドとプッシュ
@@ -93,7 +125,7 @@ docker push "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${IMAGE}:${TAG}"
 
 ### 4.1 初回、または環境変数・SA をまとめて指定するとき
 
-サービス名を **`audio-split`** とした例です。**`SPLIT_AUTH_SECRET` は `--set-env-vars` に平文で埋め込まず**、Secret Manager と `--set-secrets`（または `--env-vars-file`）を推奨します（シェル履歴・CI ログ漏えい防止）。秘密作成後、ランタイム SA に `roles/secretmanager.secretAccessor` を付与してください。
+サービス名を **`audio-split`** とした例です。**`SPLIT_AUTH_SECRET` は `--set-env-vars` に平文で埋め込まず**、Secret Manager と `--set-secrets`（または `--env-vars-file`）を推奨します（シェル履歴・CI ログ漏えい防止）。**秘密作成と SA への権限付与は §2.4 参照。** ランタイム SA に **`roles/secretmanager.secretAccessor`** を付与したうえでデプロイしてください。
 
 ```bash
 gcloud run deploy audio-split \
@@ -156,6 +188,8 @@ gcloud run services describe audio-split \
 | **403**（push / gcloud） | プロジェクト違い、権限不足、`artifactregistry.googleapis.com` 未使用。 |
 | `cd: ... workers/audio-split` | リポジトリの**実パス**で `cd`（例: `~/Downloads/temp/growpoint/workers/audio-split`）。 |
 | Tasks 実行後に 401/403 | `CLOUD_RUN_SERVICE_URL` と実 URL の不一致、Invoker SA・OIDC 設定の不整合。詳細は README の環境変数表を参照。 |
+| Cloud Run **起動時**に secret 関連エラー | シークレット名 **`split-auth-secret`** が未作成、またはランタイム SA に **`roles/secretmanager.secretAccessor`** が無い。§2.4 でシークレット作成と `gcloud secrets add-iam-policy-binding` を確認。 |
+| **Secret Manager API** エラー（参照・取得で失敗） | プロジェクトで **`secretmanager.googleapis.com`** が無効。§2.4.1 のとおり API を有効化。 |
 
 ---
 

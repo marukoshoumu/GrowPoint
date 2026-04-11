@@ -103,19 +103,24 @@ function supersedeSplitPendingRowsForChunk_(userName, interviewDate) {
 
   const targetDate = normalizeDashboardDate_(interviewDate);
   const ts = formatDateTime();
-  let n = 0;
+  const numCols = data[0].length;
+  const updates = [];
   for (let i = 1; i < data.length; i++) {
     if (data[i][col['ステータス']] !== CONFIG.STATUS.SPLIT_PENDING) continue;
     if (data[i][col['利用者名']] !== userName) continue;
     if (normalizeDashboardDate_(data[i][col['面談日']]) !== targetDate) continue;
-    data[i][col['ステータス']] = CONFIG.STATUS.SPLIT_SUPERSEDED;
-    data[i][col['エラー内容']] = 'チャンク処理に引き継ぎ（長尺分割）';
-    data[i][col['処理完了']] = ts;
-    n++;
+    const row = data[i].slice();
+    row[col['ステータス']] = CONFIG.STATUS.SPLIT_SUPERSEDED;
+    row[col['エラー内容']] = 'チャンク処理に引き継ぎ（長尺分割）';
+    row[col['処理完了']] = ts;
+    updates.push({ sheetRow: i + 1, row: row });
   }
-  if (n > 0) {
-    sheet.getRange(1, 1, data.length, data[0].length).setValues(data);
-    logInfo('Dashboard', `SPLIT_PENDING を SPLIT_SUPERSEDED に更新: ${n} 行`, { userName: userName, date: targetDate });
+  for (let u = 0; u < updates.length; u++) {
+    const r = updates[u].sheetRow;
+    sheet.getRange(r, 1, r, numCols).setValues([updates[u].row]);
+  }
+  if (updates.length > 0) {
+    logInfo('Dashboard', `SPLIT_PENDING を SPLIT_SUPERSEDED に更新: ${updates.length} 行`, { userName: userName, date: targetDate });
   }
 }
 
@@ -373,7 +378,8 @@ function findRowsByStatus(targetStatus) {
         transcriptUrl: data[i][col['文字起こし']],
         extractionUrl: data[i][col['構造化抽出']],
         updatedAt: data[i][col['処理開始']],
-        chunkLabel: chunkLabel
+        chunkLabel: chunkLabel,
+        errorContent: col['エラー内容'] !== undefined ? String(data[i][col['エラー内容']] || '') : ''
       });
     }
   }

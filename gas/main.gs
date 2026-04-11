@@ -449,8 +449,8 @@ function recoverTimedOutJobs_() {
     var pUpdatedTime = new Date(pUpdatedAt).getTime();
     if (now - pUpdatedTime <= CONFIG.TRANSCRIBE_TIMEOUT_THRESHOLD_MS) continue;
 
-    // エラー内容からリトライ回数を抽出
-    var errorContent = getErrorContentForRow_(pendingJobs[p].rowNumber);
+    // エラー内容からリトライ回数を抽出（findRowsByStatus で一括取得済み）
+    var errorContent = pendingJobs[p].errorContent != null ? String(pendingJobs[p].errorContent) : '';
     var recoverCount = parseRecoverCount_(errorContent);
 
     if (recoverCount >= CONFIG.TRANSCRIBE_MAX_RECOVER_COUNT) {
@@ -469,20 +469,6 @@ function recoverTimedOutJobs_() {
       });
     }
   }
-}
-
-
-/** ダッシュボードの「エラー内容」列の値を取得 */
-function getErrorContentForRow_(rowNumber) {
-  var ss = SpreadsheetApp.openById(getSpreadsheetId());
-  var sheet = ss.getSheetByName(CONFIG.SHEET_NAMES.STATUS);
-  var hdrRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  var colIdx = -1;
-  for (var i = 0; i < hdrRow.length; i++) {
-    if (hdrRow[i] === 'エラー内容') { colIdx = i + 1; break; }
-  }
-  if (colIdx === -1) return '';
-  return String(sheet.getRange(rowNumber, colIdx).getValue() || '');
 }
 
 

@@ -23,6 +23,19 @@ def transcript_filename(date: str, user_name: str) -> str:
 def chunk_transcript_filename(
     date: str, user_name: str, chunk_index: int, chunk_total: int
 ) -> str:
-    """チャンク用: {date}_{userName}_文字起こし_{NN}.txt"""
-    pad = _chunk_index_pad(chunk_index, chunk_total)
+    """チャンク用: {date}_{userName}_文字起こし_{NN}.txt（chunk は GAS と同様 1 始まり）。"""
+    try:
+        ct = int(chunk_total)
+        ci = int(chunk_index)
+    except (TypeError, ValueError) as e:
+        raise ValueError(
+            f"chunk_index and chunk_total must be integers, got {chunk_index!r}, {chunk_total!r}"
+        ) from e
+    if ct < 1:
+        raise ValueError(f"chunk_total must be >= 1, got {ct}")
+    if not (1 <= ci <= ct):
+        raise ValueError(
+            f"chunk_index must be between 1 and {ct} (inclusive), got {ci}"
+        )
+    pad = _chunk_index_pad(ci, ct)
     return _transcript_base_prefix(date, user_name) + "_" + pad + ".txt"

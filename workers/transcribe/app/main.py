@@ -8,9 +8,11 @@ Cloud Run: 音声ファイルを Gemini で文字起こしし、結果を Drive 
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import logging
 import os
+import re
 import secrets
 import shutil
 import tempfile
@@ -100,6 +102,57 @@ def _drive_service():
     return build("drive", "v3", cache_discovery=False)
 
 
+# Cloud Tasks の task.name は全体で 500 文字以内。task ID は [A-Za-z0-9_-] 等の制約に合わせる。
+_CLOUD_TASKS_FULL_NAME_MAX_LEN = 500
+
+
+def _cloud_tasks_task_resource_name(parent: str, process_id: str) -> str:
+    """
+    process_id を Cloud Tasks の task 名に埋め込める形にサニタイズする。
+    長さ超過時は切り詰め、衝突回避のため SHA256 の先頭 8 hex を付与する。
+    """
+    safe = re.sub(r"[^A-Za-z0-9_-]", "-", process_id)
+    safe = re.sub(r"-+", "-", safe).strip("-")
+    if not safe:
+        safe = "id"
+    prefix = "transcribe-"
+    base = f"{parent}/tasks/{prefix}"
+    room = _CLOUD_TASKS_FULL_NAME_MAX_LEN - len(base)
+    if room < 9:
+        h = hashlib.sha256(process_id.encode("utf-8")).hexdigest()[:8]
+        return f"{parent}/tasks/{prefix}{h}"
+    if len(safe) <= room:
+        return f"{base}{safe}"
+    h = hashlib.sha256(process_id.encode("utf-8")).hexdigest()[:8]
+    max_safe = room - 9
+    if max_safe < 1:
+        return f"{parent}/tasks/{prefix}{h}"
+    trunc = safe[:max_safe]
+    return f"{base}{trunc}-{h}"
+
+
+def _move_audio_to_error_folder(svc: Any, file_id: str, error_folder_id: str) -> None:
+    """失敗時: 元音声をエラーフォルダへ移動（audio-split と同様）。"""
+    fmeta = (
+        svc.files()
+        .get(fileId=file_id, fields="parents", supportsAllDrives=True)
+        .execute()
+    )
+    prev = ",".join(fmeta.get("parents") or [])
+    if prev and error_folder_id:
+        svc.files().update(
+            fileId=file_id,
+            addParents=error_folder_id,
+            removeParents=prev,
+            fields="id, parents",
+            supportsAllDrives=True,
+        ).execute()
+    else:
+        svc.files().update(
+            fileId=file_id, body={"trashed": True}, supportsAllDrives=True
+        ).execute()
+
+
 def _download_file(svc, file_id: str, dest: Path) -> None:
     request_media = svc.files().get_media(fileId=file_id, supportsAllDrives=True)
     with dest.open("wb") as out_f:
@@ -109,18 +162,27 @@ def _download_file(svc, file_id: str, dest: Path) -> None:
             _status, done = downloader.next_chunk()
 
 
+def _drive_q_escape_file_name(file_name: str) -> str:
+    """Drive files.list の q 内の文字列リテラル用に、単引用符をエスケープする。"""
+    return file_name.replace("'", r"\'")
+
+
 def _upload_text_to_drive(svc, folder_id: str, file_name: str, text: str) -> str:
     """テキストを Drive フォルダにアップロードし、file ID を返す。同名は上書き相当（先に削除）。"""
-    # 同名ファイルをゴミ箱へ（重複防止）
-    q = f"name='{file_name}' and '{folder_id}' in parents and trashed=false"
+    escaped = _drive_q_escape_file_name(file_name)
+    q = f"name='{escaped}' and '{folder_id}' in parents and trashed=false"
     existing = svc.files().list(q=q, fields="files(id)", supportsAllDrives=True).execute()
     for f in existing.get("files", []):
         svc.files().update(fileId=f["id"], body={"trashed": True}, supportsAllDrives=True).execute()
 
-    tmp = Path(tempfile.mktemp(suffix=".txt"))
+    tmp = tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".txt", delete=False)
+    tmp_path = Path(tmp.name)
     try:
-        tmp.write_text(text, encoding="utf-8")
-        media = MediaFileUpload(str(tmp), mimetype="text/plain", resumable=False)
+        try:
+            tmp.write(text)
+        finally:
+            tmp.close()
+        media = MediaFileUpload(str(tmp_path), mimetype="text/plain", resumable=False)
         created = svc.files().create(
             body={"name": file_name, "parents": [folder_id]},
             media_body=media,
@@ -129,7 +191,7 @@ def _upload_text_to_drive(svc, folder_id: str, file_name: str, text: str) -> str
         ).execute()
         return created["id"]
     finally:
-        tmp.unlink(missing_ok=True)
+        tmp_path.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -258,6 +320,7 @@ def _run_transcribe_job(payload: dict[str, Any]) -> None:
     tmp_root = Path(tempfile.mkdtemp(prefix="transcribe_"))
     local_audio = tmp_root / "audio.bin"
 
+    svc = None
     try:
         svc = _drive_service()
         logger.info("transcribe job start audioFileId=%s", audio_file_id)
@@ -287,6 +350,13 @@ def _run_transcribe_job(payload: dict[str, Any]) -> None:
 
     except Exception as e:
         logger.exception("transcribe job failed audioFileId=%s err=%s", audio_file_id, e)
+        if svc is not None and error_folder_id and audio_file_id:
+            try:
+                _move_audio_to_error_folder(svc, str(audio_file_id), str(error_folder_id))
+            except Exception as move_err:
+                logger.exception(
+                    "failed to move audio to error folder: %s", move_err
+                )
         raise
     finally:
         shutil.rmtree(tmp_root, ignore_errors=True)
@@ -310,8 +380,8 @@ def _create_cloud_task(payload: dict[str, Any], process_id: str) -> None:
     client = tasks_v2.CloudTasksClient()
     parent = client.queue_path(project, location, queue_name)
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    # task name で冪等化（同一 processId の重複投入を排除）
-    task_name = f"{parent}/tasks/transcribe-{process_id}"
+    # task name で冪等化（同一 processId の重複投入を排除）。名前は Cloud Tasks 制約に合わせてサニタイズ。
+    task_name = _cloud_tasks_task_resource_name(parent, process_id)
     task: dict[str, Any] = {
         "name": task_name,
         "http_request": {
@@ -345,7 +415,7 @@ def enqueue():
     if not payload.get("audioFileId"):
         return jsonify({"error": "audioFileId required"}), 400
 
-    process_id = str(payload.get("audioFileId", ""))
+    process_id = str(payload.get("processId") or payload.get("audioFileId") or "")
 
     allow_inline = _env("ALLOW_INLINE_EXECUTE", "0") == "1"
     has_tasks = bool(

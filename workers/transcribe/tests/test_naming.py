@@ -3,6 +3,8 @@
 同一入力に対して同一出力になることを保証する。
 """
 
+import pytest
+
 from app.naming import transcript_filename, chunk_transcript_filename
 
 
@@ -36,3 +38,13 @@ class TestChunkTranscriptFilename:
     def test_hundred_chunks(self):
         assert chunk_transcript_filename("2026-04-11", "田中", 1, 100) == "2026-04-11_田中_文字起こし_001.txt"
         assert chunk_transcript_filename("2026-04-11", "田中", 100, 100) == "2026-04-11_田中_文字起こし_100.txt"
+
+    def test_invalid_chunk_index_raises(self):
+        with pytest.raises(ValueError, match="chunk_index"):
+            chunk_transcript_filename("2026-04-11", "田中", 0, 2)
+        with pytest.raises(ValueError, match="chunk_index"):
+            chunk_transcript_filename("2026-04-11", "田中", 3, 2)
+
+    def test_invalid_chunk_total_raises(self):
+        with pytest.raises(ValueError, match="chunk_total"):
+            chunk_transcript_filename("2026-04-11", "田中", 1, 0)
