@@ -166,12 +166,12 @@ function enqueueFileLocked_(audioFile) {
 }
 
 /**
- * Stage 1: 文字起こし
+ * Stage 1: Cloud Run に文字起こしを委託
  */
 function executeStage1_(job) {
-  logInfo('Main', `Stage1開始: ${job.processId}`);
+  logInfo('Main', 'Stage1 enqueue開始: ' + job.processId);
   updateDashboardStatus(job.rowNumber, {
-    'ステータス': CONFIG.STATUS.STAGE1_RUNNING,
+    'ステータス': CONFIG.STATUS.STAGE1_PENDING,
     '処理開始': formatDateTime()
   });
 
@@ -183,44 +183,30 @@ function executeStage1_(job) {
   try {
     userMaster = loadUserMaster(userName);
     if (!userMaster) {
-      handleError_(job.processId, job.rowNumber, `利用者「${job.userName}」がマスターに見つかりません`);
+      handleError_(job.processId, job.rowNumber, '利用者「' + job.userName + '」がマスターに見つかりません');
       return;
     }
-    userMaster.date = interviewDate;
   } catch (e) {
-    handleError_(job.processId, job.rowNumber, `マスター取得失敗: ${e.message}`);
+    handleError_(job.processId, job.rowNumber, 'マスター取得失敗: ' + e.message);
     return;
   }
 
   const processingFolder = createUserProcessingFolder(folderIds.extracted, userName, interviewDate);
 
-  const stage1 = runStage1(job.processId);
-  if (!stage1.success) {
-    handleError_(job.processId, job.rowNumber, `Stage1失敗: ${stage1.error}`);
+  const chunk = parseChunkLabel_(job.chunkLabel || '');
+  const chunkIndex = chunk ? chunk.chunkIndex : null;
+  const chunkTotal = chunk ? chunk.chunkTotal : null;
+
+  const result = requestTranscribeEnqueue_(
+    job.processId, userName, interviewDate, chunkIndex, chunkTotal, processingFolder.getId()
+  );
+
+  if (!result.success) {
+    handleError_(job.processId, job.rowNumber, 'Stage1 enqueue失敗: ' + result.error);
     return;
   }
 
-  const chunk = parseChunkLabel_(job.chunkLabel || '');
-  if (chunk) {
-    const transcriptFileId = saveTranscriptChunk(
-      processingFolder.getId(), userName, interviewDate, stage1.data.transcript, chunk.chunkIndex, chunk.chunkTotal
-    );
-    updateDashboardStatus(job.rowNumber, {
-      'ステータス': CONFIG.STATUS.STAGE1_CHUNK_WAIT,
-      '文字起こし': getFileUrl(transcriptFileId)
-    });
-    tryMergeChunkGroupAfterStage1_(userName, interviewDate, chunk.chunkTotal, processingFolder.getId());
-  } else {
-    const transcriptFileId = saveTranscript(
-      processingFolder.getId(), userName, interviewDate, stage1.data.transcript
-    );
-    updateDashboardStatus(job.rowNumber, {
-      'ステータス': CONFIG.STATUS.STAGE1_DONE,
-      '文字起こし': getFileUrl(transcriptFileId)
-    });
-  }
-
-  logInfo('Main', `Stage1完了: ${job.processId}`);
+  logInfo('Main', 'Stage1 enqueue完了: ' + job.processId);
 }
 
 

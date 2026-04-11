@@ -1,35 +1,48 @@
-function runStage1(audioFileId) {
-  logInfo('Stage1', `文字起こし開始: ${audioFileId}`);
+/**
+ * Cloud Run transcribe ワーカーに文字起こしジョブを投入する。
+ * @returns {{ success: boolean, error?: string }}
+ */
+function requestTranscribeEnqueue_(audioFileId, userName, interviewDate, chunkIndex, chunkTotal, extractedFolderId) {
+  var props = PropertiesService.getScriptProperties();
+  var workerUrl = props.getProperty('TRANSCRIBE_WORKER_URL');
+  var secret = props.getProperty('TRANSCRIBE_AUTH_SECRET');
+  if (!workerUrl || !secret) {
+    return { success: false, error: 'TRANSCRIBE_WORKER_URL または TRANSCRIBE_AUTH_SECRET が未設定' };
+  }
+
+  var glossary = loadGlossary();
+  var prompt = getStage1Prompt(glossary);
+
+  var folderIds = getFolderIds();
+  var payload = {
+    audioFileId: audioFileId,
+    userName: userName,
+    date: normalizeSheetDateForFilename_(interviewDate),
+    chunkIndex: chunkIndex || null,
+    chunkTotal: chunkTotal || null,
+    extractedFolderId: extractedFolderId,
+    prompt: prompt,
+    errorFolderId: folderIds.error
+  };
+
+  var url = workerUrl.replace(/\/$/, '') + '/enqueue';
+  var options = {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(payload),
+    headers: { Authorization: 'Bearer ' + secret },
+    muteHttpExceptions: true
+  };
 
   try {
-    const glossary = loadGlossary();
-    const audioFile = DriveApp.getFileById(audioFileId);
-    const mimeType = audioFile.getMimeType() || 'audio/mp4';
-    const fileUri = uploadToGeminiFileApi(audioFileId);
-
-    const prompt = getStage1Prompt(glossary);
-    const transcript = callGeminiWithRetry(prompt, {
-      model: CONFIG.STAGE1_MODEL,
-      fileUri: fileUri,
-      mimeType: mimeType,
-      temperature: 0.1,
-      maxTokens: CONFIG.STAGE1_MAX_OUTPUT_TOKENS
-    });
-
-    logInfo('Stage1', `文字起こし完了: ${transcript.length}文字`);
-    return {
-      success: true,
-      data: {
-        transcript: transcript,
-        charCount: transcript.length
-      }
-    };
+    var res = UrlFetchApp.fetch(url, options);
+    var code = res.getResponseCode();
+    if (code >= 200 && code < 300) {
+      return { success: true };
+    }
+    return { success: false, error: 'transcribe enqueue HTTP ' + code + ': ' + String(res.getContentText()).substring(0, 300) };
   } catch (e) {
-    logError('Stage1', `文字起こし失敗: ${e.message}`);
-    return {
-      success: false,
-      error: e.message
-    };
+    return { success: false, error: 'transcribe enqueue fetch error: ' + e.message };
   }
 }
 
