@@ -115,9 +115,10 @@ function supersedeSplitPendingRowsForChunk_(userName, interviewDate) {
     row[col['処理完了']] = ts;
     updates.push({ sheetRow: i + 1, row: row });
   }
+  // getRange(row, column, numRows, numColumns) — 第3・4引数は「行数・列数」（終了セル座標ではない）
   for (let u = 0; u < updates.length; u++) {
     const r = updates[u].sheetRow;
-    sheet.getRange(r, 1, r, numCols).setValues([updates[u].row]);
+    sheet.getRange(r, 1, 1, numCols).setValues([updates[u].row]);
   }
   if (updates.length > 0) {
     logInfo('Dashboard', `SPLIT_PENDING を SPLIT_SUPERSEDED に更新: ${updates.length} 行`, { userName: userName, date: targetDate });
