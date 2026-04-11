@@ -46,6 +46,51 @@ function requestTranscribeEnqueue_(audioFileId, userName, interviewDate, chunkIn
   }
 }
 
+/**
+ * STAGE1_PENDING 行に対し、Drive に文字起こし結果ファイルが存在するかチェック。
+ * 存在すれば STAGE1_DONE（or STAGE1_CHUNK_WAIT）に進める。
+ */
+function checkTranscribeResult_(job) {
+  var folderIds = getFolderIds();
+  var userName = job.userName;
+  var interviewDate = job.interviewDate;
+  var processingFolder = createUserProcessingFolder(folderIds.extracted, userName, interviewDate);
+  var folderId = processingFolder.getId();
+
+  var chunk = parseChunkLabel_(job.chunkLabel || '');
+  var expectedFileName;
+  if (chunk) {
+    var pad = formatChunkTranscriptIndexPad_(chunk.chunkIndex, chunk.chunkTotal);
+    expectedFileName = getChunkTranscriptBasePrefix_(userName, interviewDate) + '_' + pad + '.txt';
+  } else {
+    expectedFileName = getChunkTranscriptBasePrefix_(userName, interviewDate) + '.txt';
+  }
+
+  var folder = DriveApp.getFolderById(folderId);
+  var it = folder.getFilesByName(expectedFileName);
+  if (!it.hasNext()) {
+    return; // まだ結果なし。次トリガーで再確認。
+  }
+
+  var transcriptFile = it.next();
+  var transcriptUrl = getFileUrl(transcriptFile.getId());
+
+  if (chunk) {
+    updateDashboardStatus(job.rowNumber, {
+      'ステータス': CONFIG.STATUS.STAGE1_CHUNK_WAIT,
+      '文字起こし': transcriptUrl
+    });
+    tryMergeChunkGroupAfterStage1_(userName, interviewDate, chunk.chunkTotal, folderId);
+  } else {
+    updateDashboardStatus(job.rowNumber, {
+      'ステータス': CONFIG.STATUS.STAGE1_DONE,
+      '文字起こし': transcriptUrl
+    });
+  }
+
+  logInfo('Main', 'Stage1結果検出: ' + job.processId + ' → ' + expectedFileName);
+}
+
 // TODO(Phase 1): 文字起こしファイルの暗号化 or アクセス制限
 function getChunkTranscriptBasePrefix_(userName, date) {
   return normalizeSheetDateForFilename_(date) + '_' + userName + '_文字起こし';

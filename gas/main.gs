@@ -33,6 +33,20 @@ function processNewFiles() {
 function dispatchNextStage_(startTime) {
   const elapsed = () => Date.now() - startTime;
 
+  // STAGE1_PENDING → 結果ファイルポーリング → STAGE1_DONE or STAGE1_CHUNK_WAIT
+  var pendingJobs = findRowsByStatus(CONFIG.STATUS.STAGE1_PENDING);
+  for (var i = 0; i < pendingJobs.length; i++) {
+    if (elapsed() > CONFIG.STAGE_TIME_LIMIT_MS) {
+      logInfo('Main', 'タイムリミット到達（Stage1ポーリング中）');
+      return;
+    }
+    try {
+      checkTranscribeResult_(pendingJobs[i]);
+    } catch (e) {
+      logError('Main', 'Stage1結果確認例外: ' + pendingJobs[i].processId, { error: e.message });
+    }
+  }
+
   // QUEUED → Stage1
   const queuedJobs = findRowsByStatus(CONFIG.STATUS.QUEUED);
   for (let i = 0; i < queuedJobs.length; i++) {
