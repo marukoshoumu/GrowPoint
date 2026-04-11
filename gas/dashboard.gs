@@ -327,7 +327,7 @@ function getDashboardSummary() {
     const status = data[i][col['ステータス']];
     switch (status) {
       case CONFIG.STATUS.QUEUED:         summary.queued++; break;
-      case CONFIG.STATUS.STAGE1_RUNNING:
+      case CONFIG.STATUS.STAGE1_PENDING:
       case CONFIG.STATUS.STAGE1_CHUNK_WAIT:
       case CONFIG.STATUS.STAGE1_DONE:
       case CONFIG.STATUS.STAGE2_RUNNING:
