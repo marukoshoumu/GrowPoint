@@ -412,32 +412,86 @@ function extractFileIdFromUrl_(url) {
 
 
 /**
- * タイムアウトしたジョブ（_RUNNING状態で一定時間経過）をQUEUEDまたは前ステージ完了に戻す
+ * タイムアウトしたジョブ（_RUNNING/_PENDING 状態で一定時間経過）を前ステージに戻す。
+ * STAGE1_PENDING はリトライカウンタ付き: 3回超過で ERROR に落とす。
  */
 function recoverTimedOutJobs_() {
-  const now = Date.now();
-  const runningStatuses = [
-    { status: CONFIG.STATUS.STAGE1_RUNNING, recoverTo: CONFIG.STATUS.QUEUED },
-    { status: CONFIG.STATUS.STAGE2_RUNNING, recoverTo: CONFIG.STATUS.STAGE1_DONE },
-    { status: CONFIG.STATUS.STAGE3_RUNNING, recoverTo: CONFIG.STATUS.STAGE2_DONE }
+  var now = Date.now();
+
+  // Stage2/3 の RUNNING 回復（従来どおり 30 分）
+  var runningStatuses = [
+    { status: CONFIG.STATUS.STAGE2_RUNNING, recoverTo: CONFIG.STATUS.STAGE1_DONE, threshold: CONFIG.TIMEOUT_THRESHOLD_MS },
+    { status: CONFIG.STATUS.STAGE3_RUNNING, recoverTo: CONFIG.STATUS.STAGE2_DONE, threshold: CONFIG.TIMEOUT_THRESHOLD_MS }
   ];
 
-  for (let s = 0; s < runningStatuses.length; s++) {
-    const jobs = findRowsByStatus(runningStatuses[s].status);
-    for (let i = 0; i < jobs.length; i++) {
-      const updatedAt = jobs[i].updatedAt;
+  for (var s = 0; s < runningStatuses.length; s++) {
+    var jobs = findRowsByStatus(runningStatuses[s].status);
+    for (var i = 0; i < jobs.length; i++) {
+      var updatedAt = jobs[i].updatedAt;
       if (updatedAt) {
-        const updatedTime = new Date(updatedAt).getTime();
-        if (now - updatedTime > CONFIG.TIMEOUT_THRESHOLD_MS) {
-          logWarn('Main', `タイムアウト回復: ${jobs[i].processId} (${runningStatuses[s].status} → ${runningStatuses[s].recoverTo})`);
+        var updatedTime = new Date(updatedAt).getTime();
+        if (now - updatedTime > runningStatuses[s].threshold) {
+          logWarn('Main', 'タイムアウト回復: ' + jobs[i].processId + ' (' + runningStatuses[s].status + ' → ' + runningStatuses[s].recoverTo + ')');
           updateDashboardStatus(jobs[i].rowNumber, {
             'ステータス': runningStatuses[s].recoverTo,
-            'エラー内容': `タイムアウト回復 (前ステータス: ${runningStatuses[s].status})`
+            'エラー内容': 'タイムアウト回復 (前ステータス: ' + runningStatuses[s].status + ')'
           });
         }
       }
     }
   }
+
+  // STAGE1_PENDING 回復（60 分、リトライカウンタ付き）
+  var pendingJobs = findRowsByStatus(CONFIG.STATUS.STAGE1_PENDING);
+  for (var p = 0; p < pendingJobs.length; p++) {
+    var pUpdatedAt = pendingJobs[p].updatedAt;
+    if (!pUpdatedAt) continue;
+    var pUpdatedTime = new Date(pUpdatedAt).getTime();
+    if (now - pUpdatedTime <= CONFIG.TRANSCRIBE_TIMEOUT_THRESHOLD_MS) continue;
+
+    // エラー内容からリトライ回数を抽出
+    var errorContent = getErrorContentForRow_(pendingJobs[p].rowNumber);
+    var recoverCount = parseRecoverCount_(errorContent);
+
+    if (recoverCount >= CONFIG.TRANSCRIBE_MAX_RECOVER_COUNT) {
+      logError('Main', 'リトライ上限超過: ' + pendingJobs[p].processId);
+      updateDashboardStatus(pendingJobs[p].rowNumber, {
+        'ステータス': CONFIG.STATUS.ERROR,
+        'エラー内容': 'リトライ上限超過（' + CONFIG.TRANSCRIBE_MAX_RECOVER_COUNT + '回タイムアウト）',
+        '処理完了': formatDateTime()
+      });
+    } else {
+      var newCount = recoverCount + 1;
+      logWarn('Main', 'STAGE1_PENDING タイムアウト回復 (' + newCount + '/' + CONFIG.TRANSCRIBE_MAX_RECOVER_COUNT + '): ' + pendingJobs[p].processId);
+      updateDashboardStatus(pendingJobs[p].rowNumber, {
+        'ステータス': CONFIG.STATUS.QUEUED,
+        'エラー内容': 'タイムアウト回復 (' + newCount + '/' + CONFIG.TRANSCRIBE_MAX_RECOVER_COUNT + ')'
+      });
+    }
+  }
+}
+
+
+/** ダッシュボードの「エラー内容」列の値を取得 */
+function getErrorContentForRow_(rowNumber) {
+  var ss = SpreadsheetApp.openById(getSpreadsheetId());
+  var sheet = ss.getSheetByName(CONFIG.SHEET_NAMES.STATUS);
+  var hdrRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var colIdx = -1;
+  for (var i = 0; i < hdrRow.length; i++) {
+    if (hdrRow[i] === 'エラー内容') { colIdx = i + 1; break; }
+  }
+  if (colIdx === -1) return '';
+  return String(sheet.getRange(rowNumber, colIdx).getValue() || '');
+}
+
+
+/** "タイムアウト回復 (N/M)" から N を抽出。見つからなければ 0。 */
+function parseRecoverCount_(errorContent) {
+  if (!errorContent) return 0;
+  var m = errorContent.match(/タイムアウト回復\s*\((\d+)\//);
+  if (m) return parseInt(m[1], 10);
+  return 0;
 }
 
 
