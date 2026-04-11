@@ -401,14 +401,13 @@ function sortStage1PendingJobsByChunkIndex_(jobs) {
     var db = normalizeInterviewDateKey_(b.interviewDate);
     if (da !== db) return da < db ? -1 : da > db ? 1 : 0;
 
+    // 同一利用者・面談日のみチャンク順を適用。それ以外はシート行順。
     var pa = parseChunkLabel_(normalizeChunkLabel_(a.chunkLabel || ''));
     var pb = parseChunkLabel_(normalizeChunkLabel_(b.chunkLabel || ''));
     if (pa && pb) {
       if (pa.chunkTotal !== pb.chunkTotal) return pa.chunkTotal - pb.chunkTotal;
       return pa.chunkIndex - pb.chunkIndex;
     }
-    if (pa && !pb) return 1;
-    if (!pa && pb) return -1;
     return (a.rowNumber || 0) - (b.rowNumber || 0);
   });
 }

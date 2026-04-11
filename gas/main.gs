@@ -456,14 +456,14 @@ function manualRecoverStuckJobs() {
 
   // 再試行可能な ERROR → STAGE1_DONE（カウンタ維持）
   var errorJobs = findRowsByStatus(CONFIG.STATUS.ERROR);
-  for (var e = 0; e < errorJobs.length; e++) {
-    var errMsg = errorJobs[e].errorContent != null ? String(errorJobs[e].errorContent) : '';
+  for (var ei = 0; ei < errorJobs.length; ei++) {
+    var errMsg = errorJobs[ei].errorContent != null ? String(errorJobs[ei].errorContent) : '';
     if (!isRecoverableStage2Error_(errMsg)) continue;
     var s2count = parseStage2ErrorRecoverCount_(errMsg);
     if (s2count >= CONFIG.STAGE2_ERROR_RECOVER_MAX) continue;
     var newS2 = s2count + 1;
-    logWarn('Main', '手動リカバリ Stage2 ERROR → STAGE1_DONE (' + newS2 + '/' + CONFIG.STAGE2_ERROR_RECOVER_MAX + '): ' + errorJobs[e].processId);
-    updateDashboardStatus(errorJobs[e].rowNumber, {
+    logWarn('Main', '手動リカバリ Stage2 ERROR → STAGE1_DONE (' + newS2 + '/' + CONFIG.STAGE2_ERROR_RECOVER_MAX + '): ' + errorJobs[ei].processId);
+    updateDashboardStatus(errorJobs[ei].rowNumber, {
       'ステータス': CONFIG.STATUS.STAGE1_DONE,
       'エラー内容': 'Stage2再試行 (' + newS2 + '/' + CONFIG.STAGE2_ERROR_RECOVER_MAX + ') 手動リカバリ 前回: ' + errMsg.substring(0, 400)
     });
@@ -509,16 +509,16 @@ function recoverTimedOutJobs_() {
 
   // Stage2 が ERROR かつ JSON/トークン切れ等の一時失敗 → STAGE1_DONE に戻して次回から Stage2 再実行
   var errorJobs = findRowsByStatus(CONFIG.STATUS.ERROR);
-  for (var e = 0; e < errorJobs.length; e++) {
-    var errMsg = errorJobs[e].errorContent != null ? String(errorJobs[e].errorContent) : '';
+  for (var ei = 0; ei < errorJobs.length; ei++) {
+    var errMsg = errorJobs[ei].errorContent != null ? String(errorJobs[ei].errorContent) : '';
     if (!isRecoverableStage2Error_(errMsg)) continue;
     var s2count = parseStage2ErrorRecoverCount_(errMsg);
     if (s2count >= CONFIG.STAGE2_ERROR_RECOVER_MAX) {
       continue;
     }
     var newS2 = s2count + 1;
-    logWarn('Main', 'Stage2 ERROR 自動再試行 (' + newS2 + '/' + CONFIG.STAGE2_ERROR_RECOVER_MAX + '): ' + errorJobs[e].processId);
-    updateDashboardStatus(errorJobs[e].rowNumber, {
+    logWarn('Main', 'Stage2 ERROR 自動再試行 (' + newS2 + '/' + CONFIG.STAGE2_ERROR_RECOVER_MAX + '): ' + errorJobs[ei].processId);
+    updateDashboardStatus(errorJobs[ei].rowNumber, {
       'ステータス': CONFIG.STATUS.STAGE1_DONE,
       'エラー内容': 'Stage2再試行 (' + newS2 + '/' + CONFIG.STAGE2_ERROR_RECOVER_MAX + ') 前回: ' + errMsg.substring(0, 400)
     });
@@ -555,10 +555,10 @@ function recoverTimedOutJobs_() {
 }
 
 
-/** "タイムアウト回復 (N/M)" から N を抽出。見つからなければ 0。 */
+/** "タイムアウト回復 (N/M)" または "手動リカバリ (N/M)" から N を抽出。見つからなければ 0。 */
 function parseRecoverCount_(errorContent) {
   if (!errorContent) return 0;
-  var m = errorContent.match(/タイムアウト回復\s*\((\d+)\//);
+  var m = errorContent.match(/(?:タイムアウト回復|手動リカバリ)\s*\((\d+)\//);
   if (m) return parseInt(m[1], 10);
   return 0;
 }
